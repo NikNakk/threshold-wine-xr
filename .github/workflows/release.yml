@@ -22,7 +22,6 @@ jobs:
     runs-on: macos-15-intel
     timeout-minutes: 180
     env:
-      RELEASE_WORK: ${{ runner.temp }}/threshold-bridge
       INPUT_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +35,9 @@ jobs:
           value=os.environ['GITHUB_REF_NAME'][10:] if os.environ['GITHUB_REF_TYPE']=='tag' else os.environ['INPUT_VERSION']
           assert re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,159}',value)
           assert os.environ['GITHUB_REPOSITORY']=='NikNakk/threshold-wine-xr'
-          with open(os.environ['GITHUB_ENV'],'a') as stream:stream.write('VERSION='+value+'\n')
+          with open(os.environ['GITHUB_ENV'],'a') as stream:
+              stream.write('VERSION='+value+'\n')
+              stream.write('RELEASE_WORK='+os.environ['RUNNER_TEMP']+'/threshold-bridge\n')
           PY
       - name: Install build dependencies
         id: toolchain
