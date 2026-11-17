@@ -52,9 +52,9 @@ class Profiles(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'new output'):self.prepare()
 
     def test_inherited_native_redirects_are_removed(self):
-        env=profiles.launch_environment(self.prepare(),{'MWXR_LSTEAMCLIENT':'1','DYLD_INSERT_LIBRARIES':'private','PATH':'test'})
+        env=profiles.launch_environment(self.prepare(),{'MWXR_LSTEAMCLIENT':'1','DYLD_INSERT_LIBRARIES':'private','PATH':'test','MWXR_ALYX':'native'})
         self.assertNotIn('MWXR_LSTEAMCLIENT',env);self.assertNotIn('DYLD_INSERT_LIBRARIES',env)
-        self.assertEqual(env['PATH'],'test')
+        self.assertEqual(env['PATH'],'test');self.assertNotIn('MWXR_ALYX',env)
 
     def test_mixed_or_unknown_integration_is_rejected(self):
         stack=self.prepare();stack['steam_play']={}

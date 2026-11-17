@@ -20,7 +20,7 @@ When the native and Windows bridge artifacts are separate, the selected stack mu
 
 The output contains a local Wine/DXMT/bridge/xrizer composition and `launch-stack.json`. It hashes the full file inventory, launch helpers and native runtime library. It never distributes that locally composed directory. The prefix remains persistent data outside it.
 
-Use **Components → Select Windows XR Profile…** in Threshold XR to select this prepared file. The app verifies its inventory and preserves its integration mode. Selection does not start or stop anything.
+Use **Components → Launch Stack → Select Windows XR Profile…** in Threshold XR to select this prepared file. The app verifies its inventory and preserves its integration mode. Selection does not start or stop anything.
 
 ```zsh
 python3 tools/run_profile.py --stack '/path/to/prepared/launch-stack.json' \
