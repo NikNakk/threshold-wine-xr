@@ -1,0 +1,19 @@
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# For integration into a Wine tree. The standalone prototype currently uses
+# scripts/build-in-process-gate.zsh and generates the listed thunk sources.
+MODULE = wineopenxr.dll
+UNIXLIB = wineopenxr.so
+IMPORTS = kernel32 dxgi
+UNIX_LIBS = -lopenxr_loader
+SOURCES = \
+	graphics.cpp \
+	graphics_vulkan.cpp \
+	graphics_interop.cpp \
+	graphics_interop_dxmt.cpp \
+	graphics_interop_native.m \
+	graphics_native.m \
+	openxr.c \
+	openxr_loader.c \
+	openxr_thunks.c \
+	loader_thunks.c

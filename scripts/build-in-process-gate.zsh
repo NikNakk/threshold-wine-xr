@@ -1,0 +1,73 @@
+#!/bin/zsh
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: LGPL-2.1-or-later
+set -euo pipefail
+repo=${0:A:h:h}
+: ${DXMT_SOURCE_DIR:?DXMT headers with IDXMTNativeDevice2}
+: ${MWXR_WINE_SDK:?Wine SDK containing bin/winebuild}
+: ${MWXR_WINE_SOURCE:?Wine source headers matching the pinned Proton reference}
+: ${MWXR_WINE_RUNTIME:?Wine 11 runtime directory containing lib/wine/x86_64-unix/ntdll.so}
+: ${MWXR_NATIVE_LOADER:?x86_64 Khronos libopenxr_loader.dylib}
+: ${OPENXR_SOURCE_DIR:?Khronos SDK source containing specification/registry/xr.xml}
+vulkan_headers=${VULKAN_HEADERS_DIR:-/opt/homebrew/include}
+root=${MWXR_IN_PROCESS_BUILD:-${repo}/build-in-process/gate}
+mkdir -p "${root}/generated" "${root}/support/wine" "${root}/x86_64-windows" "${root}/x86_64-unix"
+python3 "${repo}/tools/generate_in_process.py" \
+ --xml "${OPENXR_SOURCE_DIR}/specification/registry/xr.xml" --output "${root}/generated"
+for header in debug.h list.h unixlib.h; do
+ ln -sf "${MWXR_WINE_SOURCE}/include/wine/${header}" "${root}/support/wine/${header}"
+done
+cp "${repo}/src/in_process/proton/loader_structs.h" "${root}/generated/"
+print '#define HAVE_UNISTD_H 1' > "${root}/generated/config.h"
+inc=(-I"${vulkan_headers}" -I"${repo}/src/in_process" -I"${repo}/src/in_process/proton" \
+ -I"${root}/generated" -I"${root}/support" -I"${MWXR_WINE_SDK}/include/wine/windows")
+pe_lib=${MWXR_WINE_SDK}/lib/wine/x86_64-windows
+# PE graphics: OpenXR adaptation plus the renderer-neutral interop backends.
+graphics_objects=()
+foveation_flags=()
+if rg -q 'struct IDXMTNativeContext2 ' "${DXMT_SOURCE_DIR}/include/dxmt_native_interop.h"; then
+ foveation_flags=(-DMWXR_DXMT_TARGET_FOVEATION=1)
+fi
+for source in graphics graphics_vulkan graphics_interop graphics_interop_dxmt; do
+ x86_64-w64-mingw32-g++ -c -fno-exceptions -fno-rtti -fcheck-new -D__WINESRC__ -D_WIN64 -DWINE_NO_LONG_TYPES "${foveation_flags[@]}" \
+  -I"${vulkan_headers}" -I"${repo}/src/in_process" -I"${root}/generated" -I"${root}/support" -I"${DXMT_SOURCE_DIR}/include" -I"${DXMT_SOURCE_DIR}/include/native/directx" \
+  "${repo}/src/in_process/${source}.cpp" -o "${root}/${source}.o"
+ graphics_objects+=("${root}/${source}.o")
+done
+x86_64-w64-mingw32-gcc -shared -D__WINESRC__ -D_WIN64 -DWINE_NO_LONG_TYPES "${inc[@]}" \
+ "${repo}/src/in_process/openxr_loader.c" "${root}/generated/loader_thunks.c" "${graphics_objects[@]}" \
+ "${pe_lib}/libwinecrt0.a" "${pe_lib}/libntdll.a" -lkernel32 -ldxgi -ldxguid \
+ -Wl,--export-all-symbols -o "${root}/x86_64-windows/wineopenxr.dll"
+"${MWXR_WINE_SDK}/bin/winebuild" --builtin "${root}/x86_64-windows/wineopenxr.dll"
+clang -arch x86_64 -shared -D__WINESRC__ -D_WIN64 -DWINE_NO_LONG_TYPES -DWINE_UNIX_LIB "${inc[@]}" \
+ "${repo}/src/in_process/openxr.c" "${root}/generated/openxr_thunks.c" "${repo}/src/in_process/graphics_native.m" \
+ "${repo}/src/in_process/graphics_interop_native.m" \
+ -framework Metal -framework Foundation -framework CoreGraphics -framework ImageIO \
+ "${MWXR_NATIVE_LOADER}" "${MWXR_WINE_RUNTIME}/lib/wine/x86_64-unix/ntdll.so" \
+ -Wl,-install_name,@rpath/wineopenxr.so -Wl,-rpath,"${MWXR_NATIVE_LOADER:h}" \
+ -Wl,-rpath,"${MWXR_WINE_RUNTIME}/lib/wine/x86_64-unix" \
+ -o "${root}/x86_64-unix/wineopenxr.so"
+print "Built experimental D3D11/Vulkan-to-Metal runtime at ${root}."
+
+x86_64-w64-mingw32-gcc -I"${OPENXR_SOURCE_DIR}/include" \
+ "${repo}/tests/windows/in_process_gate.c" -o "${root}/in_process_gate.exe"
+x86_64-w64-mingw32-gcc -std=c11 -municode -static \
+ "${repo}/src/windows/offscreen_unity_window.c" -luser32 -o "${root}/offscreen_unity_window.exe"
+
+x86_64-w64-mingw32-g++ -static -I"${vulkan_headers}" -I"${OPENXR_SOURCE_DIR}/include" \
+ "${repo}/tests/windows/openxr_vulkan_probe.cpp" -o "${root}/openxr_vulkan_probe.exe"
+
+x86_64-w64-mingw32-g++ -static -I"${vulkan_headers}" \
+ -I"${repo}/third_party/openvr" \
+ "${repo}/tests/windows/openvr_vulkan_probe.cpp" -o "${root}/openvr_vulkan_probe.exe"
+
+# Diagnostic-only Metal readback helper for runtime-owned image verification.
+x86_64-w64-mingw32-gcc -shared -D__WINESRC__ -D_WIN64 -DWINE_NO_LONG_TYPES "${inc[@]}" \
+ "${repo}/tests/in_process/metal_probe_pe.c" "${pe_lib}/libwinecrt0.a" "${pe_lib}/libntdll.a" \
+ -Wl,--export-all-symbols -o "${root}/x86_64-windows/wine_metal_probe.dll"
+"${MWXR_WINE_SDK}/bin/winebuild" --builtin "${root}/x86_64-windows/wine_metal_probe.dll"
+clang -arch x86_64 -shared -I"${repo}/tests/in_process" \
+ "${repo}/tests/in_process/metal_probe_native.m" -framework Metal -framework Foundation \
+ -o "${root}/x86_64-unix/wine_metal_probe.so"
+x86_64-w64-mingw32-g++ -static -I"${OPENXR_SOURCE_DIR}/include" \
+ "${repo}/tests/windows/in_process_swapchain.cpp" -ld3d11 -ldxguid -o "${root}/in_process_swapchain.exe"
