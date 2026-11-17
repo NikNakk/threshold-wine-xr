@@ -46,15 +46,23 @@ jobs:
           echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
           identity=$({ brew list --versions; xcrun clang --version; xcrun --show-sdk-version; } | shasum -a 256 | awk '{print $1}')
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: sdk-cache
         with:
           path: ${{ env.RELEASE_WORK }}/wine-sdk
-          key: bridge-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('release/inputs.json', 'release/build.sh') }}-${{ steps.toolchain.outputs.identity }}
+          key: bridge-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('release/inputs.json', 'release/build-sdk.sh') }}-${{ steps.toolchain.outputs.identity }}
       - name: Check source and profile/package tests
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build --parallel
           ctest --test-dir build --output-on-failure
+      - name: Build or verify the minimal Wine SDK
+        run: bash release/build.sh sdk
+      - uses: actions/cache/save@v4
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ env.RELEASE_WORK }}/wine-sdk
+          key: ${{ steps.sdk-cache.outputs.cache-primary-key }}
       - name: Build paired bridge and package reviewed payload
         run: bash release/build.sh
       - uses: actions/upload-artifact@v4

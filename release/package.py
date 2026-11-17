@@ -123,10 +123,12 @@ def package(build,native_loader,windows_loader,source_archives,version,commit,wo
                         raise ValueError('Expected Win64 binary')
             for name in ('LICENSE','NOTICE.md','README.md'):copy_file(root/name,stage/name)
             for path in (root/'LICENSES').glob('*'):copy_file(path,stage/'LICENSES'/path.name)
-            for name in ('LICENSE','COPYING','COPYING.md','COPYING.LIB'):
-                matches=list(Path(source_archives).parent.glob('inputs/*/'+name+'*'))
-                for path in matches:
-                    if path.is_file():copy_file(path,stage/'LICENSES'/path.parent.name/path.name)
+            inputs_root=Path(source_archives).parent/'inputs'
+            for checkout in inputs_root.iterdir():
+                for path in checkout.rglob('*'):
+                    relative=path.relative_to(checkout)
+                    if '.git' not in relative.parts and path.is_file() and path.name.upper().startswith(('LICENSE','COPYING','NOTICE','AUTHORS')):
+                        copy_file(path,stage/'LICENSES/dependencies'/checkout.name/relative)
             copy_file(root/'release/inputs.json',stage/'build-inputs.json')
             name=f'{COMPONENT}-{version}-{platform}.tar.xz'
             archive_tree(stage,output/name)
@@ -134,7 +136,7 @@ def package(build,native_loader,windows_loader,source_archives,version,commit,wo
     # Source and build recipe accompany binaries; development caches/SDKs never do.
     subprocess.run(['git','archive','--format=tar.gz','--prefix='+COMPONENT+'/', '-o',str(output.resolve()/f'{COMPONENT}-{version}-source.tar.gz'),commit],cwd=root,check=True)
     for path in Path(source_archives).glob('*-source.tar.gz'):copy_file(path,output/path.name)
-    required={f"{name}-{value['revision']}-source.tar.gz" for name,value in json.loads((root/'release/inputs.json').read_text()).items() if name in ('wine','openxr')}
+    required={f"{name}-{value['revision']}-source.tar.gz" for name,value in json.loads((root/'release/inputs.json').read_text()).items()}
     if not required.issubset({p.name for p in output.iterdir()}):raise ValueError('Missing corresponding dependency source')
     manifest=make_manifest(version,commit,workflow_run,entries)
     (output/'threshold-release.json').write_text(json.dumps(manifest,indent=2)+'\n')

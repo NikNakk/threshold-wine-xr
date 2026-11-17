@@ -20,36 +20,16 @@ for name, spec in json.loads(pathlib.Path(sys.argv[1]).read_text()).items():
         subprocess.run(['git','-C',str(target),'checkout','--detach','FETCH_HEAD'],check=True)
     assert subprocess.check_output(['git','-C',str(target),'rev-parse','HEAD'],text=True).strip()==spec['revision']
     subprocess.run(['git','-C',str(target),'submodule','update','--init','--recursive'],check=True)
-    # Complete source for incorporated Wine CRT objects and the bundled Khronos loader.
-    if name in ('wine','openxr'):
-        archive=work/'source-archives'/f"{name}-{spec['revision']}-source.tar.gz"
+    # Keep dependency sources and notices beside the resulting bridge artifacts.
+    archive=work/'source-archives'/f"{name}-{spec['revision']}-source.tar.gz"
+    if not archive.exists():
         subprocess.run(['git','-C',str(target),'archive','--format=tar.gz','--prefix='+name+'/', '-o',str(archive),'HEAD'],check=True)
 PY2
 wine="$RELEASE_WORK/inputs/wine"
 sdk="$RELEASE_WORK/wine-sdk"
 # An exact-key CI cache may hold a completed SDK; a marker binds it to these inputs.
-identity=$(shasum -a 256 release/inputs.json release/build.sh | shasum -a 256 | awk '{print $1}')
-if [[ ! -f "$sdk/.complete" ]] || [[ $(cat "$sdk/.complete") != "$identity" ]]; then
-  [[ ! -e "$sdk" ]] || { echo 'SDK cache identity mismatch; refusing reuse' >&2; exit 1; }
-  mkdir -p "$RELEASE_WORK/wine-build"
-  (cd "$RELEASE_WORK/wine-build"
-   "$wine/configure" --prefix="$sdk" --enable-archs=x86_64 --disable-tests \
-    --without-x --without-gstreamer --without-sdl --without-cups --without-sane \
-    --without-usb --without-v4l2 --without-pcap --without-krb5 --without-gphoto \
-    --without-capi --without-netapi --without-opencl --without-ffmpeg
-   make -j3 tools/winebuild/winebuild include/all dlls/ntdll/ntdll.so \
-     dlls/ntdll/x86_64-windows/libntdll.a dlls/winecrt0/x86_64-windows/libwinecrt0.a)
-  # Only the compiler tool, headers, CRT/import libraries and native ntdll are
-  # needed to link the bridge. Do not build an entire Wine distribution.
-  mkdir -p "$sdk/bin" "$sdk/include/wine/windows" "$sdk/lib/wine/x86_64-windows" "$sdk/lib/wine/x86_64-unix"
-  cp -R "$wine/include/." "$sdk/include/wine/windows/"
-  cp -R "$RELEASE_WORK/wine-build/include/." "$sdk/include/wine/windows/"
-  cp "$RELEASE_WORK/wine-build/tools/winebuild/winebuild" "$sdk/bin/"
-  cp "$RELEASE_WORK/wine-build/dlls/ntdll/x86_64-windows/libntdll.a" "$sdk/lib/wine/x86_64-windows/"
-  cp "$RELEASE_WORK/wine-build/dlls/winecrt0/x86_64-windows/libwinecrt0.a" "$sdk/lib/wine/x86_64-windows/"
-  cp "$RELEASE_WORK/wine-build/dlls/ntdll/ntdll.so" "$sdk/lib/wine/x86_64-unix/"
-  printf '%s' "$identity" > "$sdk/.complete"
-fi
+source "$root/release/build-sdk.sh"
+[[ ${1:-all} != sdk ]] || exit 0
 openxr="$RELEASE_WORK/inputs/openxr"
 cmake -S "$openxr" -B "$RELEASE_WORK/loader-native" -G Ninja \
  -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 -DBUILD_TESTS=OFF \
@@ -60,7 +40,8 @@ cmake -S "$openxr" -B "$RELEASE_WORK/loader-windows" -G Ninja \
  -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows \
  -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
  -DBUILD_TESTS=OFF -DBUILD_API_LAYERS=OFF -DBUILD_LOADER=ON -DDYNAMIC_LOADER=ON \
- -DBUILD_WITH_SYSTEM_JSONCPP=OFF -DCMAKE_SHARED_LINKER_FLAGS='-static-libgcc -static-libstdc++'
+ -DBUILD_WITH_SYSTEM_JSONCPP=OFF -DCMAKE_SHARED_LINKER_FLAGS='-static-libgcc -static-libstdc++' \
+ -DCMAKE_CXX_FLAGS='-DWINAPI_PARTITION_SYSTEM=0' -DCMAKE_C_FLAGS='-DWINAPI_PARTITION_SYSTEM=0'
 cmake --build "$RELEASE_WORK/loader-windows" --target openxr_loader --parallel 3
 export DXMT_SOURCE_DIR="$RELEASE_WORK/inputs/dxmt" MWXR_WINE_SDK="$sdk" MWXR_WINE_RUNTIME="$sdk"
 export MWXR_WINE_SOURCE="$wine" OPENXR_SOURCE_DIR="$openxr"
