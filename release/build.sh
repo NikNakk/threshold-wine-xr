@@ -40,7 +40,7 @@ cmake -S "$openxr" -B "$RELEASE_WORK/loader-windows" -G Ninja \
  -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows \
  -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
  -DBUILD_TESTS=OFF -DBUILD_API_LAYERS=OFF -DBUILD_LOADER=ON -DDYNAMIC_LOADER=ON \
- -DBUILD_WITH_SYSTEM_JSONCPP=OFF -DCMAKE_SHARED_LINKER_FLAGS='-static-libgcc -static-libstdc++' \
+ -DBUILD_WITH_SYSTEM_JSONCPP=OFF -DCMAKE_SHARED_LINKER_FLAGS='-static -static-libgcc -static-libstdc++' \
  -DCMAKE_CXX_FLAGS='-DWINAPI_PARTITION_SYSTEM=0' -DCMAKE_C_FLAGS='-DWINAPI_PARTITION_SYSTEM=0'
 cmake --build "$RELEASE_WORK/loader-windows" --target openxr_loader --parallel 3
 export DXMT_SOURCE_DIR="$RELEASE_WORK/inputs/dxmt" MWXR_WINE_SDK="$sdk" MWXR_WINE_RUNTIME="$sdk"

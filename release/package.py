@@ -121,6 +121,10 @@ def package(build,native_loader,windows_loader,source_archives,version,commit,wo
                 for path in [stage/'x86_64-windows/wineopenxr.dll',stage/'openxr_loader.dll',stage/'offscreen_unity_window.exe']:
                     if 'PE32+ executable' not in subprocess.check_output(['file',str(path)],text=True):
                         raise ValueError('Expected Win64 binary')
+                    imports=subprocess.check_output(['x86_64-w64-mingw32-objdump','-p',str(path)],text=True)
+                    for library in re.findall(r'DLL Name:\s*(\S+)',imports):
+                        if library.lower().startswith(('libgcc','libstdc++','libwinpthread')):
+                            raise ValueError('Unbundled MinGW runtime dependency: '+library)
             for name in ('LICENSE','NOTICE.md','README.md'):copy_file(root/name,stage/name)
             for path in (root/'LICENSES').glob('*'):copy_file(path,stage/'LICENSES'/path.name)
             inputs_root=Path(source_archives).parent/'inputs'
