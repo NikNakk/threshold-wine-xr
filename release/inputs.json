@@ -1,0 +1,18 @@
+{
+  "wine": {
+    "repository": "NikNakk/wine-crossover",
+    "revision": "782583c1bae4e2f64748fec0d3abcf2719e8828b"
+  },
+  "dxmt": {
+    "repository": "NikNakk/dxmt",
+    "revision": "8af1b577d3c5b95e63fe41081fbe647a9f5159cc"
+  },
+  "openxr": {
+    "repository": "KhronosGroup/OpenXR-SDK",
+    "revision": "f2448a8797c85814aa892efc1ab8707900fbcc78"
+  },
+  "vulkan_headers": {
+    "repository": "KhronosGroup/Vulkan-Headers",
+    "revision": "19725e4d48082fe78e26622b15d3080ccd54112b"
+  }
+}

@@ -19,7 +19,7 @@ for header in debug.h list.h unixlib.h; do
 done
 cp "${repo}/src/in_process/proton/loader_structs.h" "${root}/generated/"
 print '#define HAVE_UNISTD_H 1' > "${root}/generated/config.h"
-inc=(-I"${vulkan_headers}" -I"${repo}/src/in_process" -I"${repo}/src/in_process/proton" \
+inc=(-ffile-prefix-map="${repo}=." -I"${vulkan_headers}" -I"${repo}/src/in_process" -I"${repo}/src/in_process/proton" \
  -I"${root}/generated" -I"${root}/support" -I"${MWXR_WINE_SDK}/include/wine/windows")
 pe_lib=${MWXR_WINE_SDK}/lib/wine/x86_64-windows
 # PE graphics: OpenXR adaptation plus the renderer-neutral interop backends.
@@ -29,7 +29,7 @@ if rg -q 'struct IDXMTNativeContext2 ' "${DXMT_SOURCE_DIR}/include/dxmt_native_i
  foveation_flags=(-DMWXR_DXMT_TARGET_FOVEATION=1)
 fi
 for source in graphics graphics_vulkan graphics_interop graphics_interop_dxmt; do
- x86_64-w64-mingw32-g++ -c -fno-exceptions -fno-rtti -fcheck-new -D__WINESRC__ -D_WIN64 -DWINE_NO_LONG_TYPES "${foveation_flags[@]}" \
+ x86_64-w64-mingw32-g++ -c -ffile-prefix-map="${repo}=." -fno-exceptions -fno-rtti -fcheck-new -D__WINESRC__ -D_WIN64 -DWINE_NO_LONG_TYPES "${foveation_flags[@]}" \
   -I"${vulkan_headers}" -I"${repo}/src/in_process" -I"${root}/generated" -I"${root}/support" -I"${DXMT_SOURCE_DIR}/include" -I"${DXMT_SOURCE_DIR}/include/native/directx" \
   "${repo}/src/in_process/${source}.cpp" -o "${root}/${source}.o"
  graphics_objects+=("${root}/${source}.o")

@@ -34,6 +34,8 @@ export MWXR_IN_PROCESS_PREFIX="$HOME/Library/Application Support/ThresholdXR/Win
 
 Install and sign into Steam normally, then install an owned game. The helpers do not supply Steam or a Wine distribution. They clear the native Steam redirect and library-injection environment variables. Wine/client compatibility depends on the supplied build.
 
+See [release CI](docs/releases.md) for paired binary builds and [managed profiles](docs/managed-profiles.md) for the separate public/private installation contract. No tagged release is required to run the source checks.
+
 ## Build and launch
 
 See [build and run](docs/build-and-run.md) for the bridge's external dependencies and complete commands, [architecture](docs/architecture.md) for component boundaries, and [validation](docs/validation.md) for checks and limitations.

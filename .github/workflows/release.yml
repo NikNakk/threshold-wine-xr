@@ -1,0 +1,96 @@
+name: Bridge release
+on:
+  push:
+    tags: ['threshold-*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: New version, without threshold- (build only unless publish is selected)
+        required: true
+        type: string
+      publish:
+        description: Publish a new prerelease after all checks pass
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: bridge-release-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 180
+    env:
+      RELEASE_WORK: ${{ runner.temp }}/threshold-bridge
+      INPUT_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate identity
+        run: |
+          python3 - <<'PY'
+          import os,re
+          if os.environ['GITHUB_REF_TYPE']=='tag':assert os.environ['GITHUB_REF_NAME'].startswith('threshold-')
+          value=os.environ['GITHUB_REF_NAME'][10:] if os.environ['GITHUB_REF_TYPE']=='tag' else os.environ['INPUT_VERSION']
+          assert re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,159}',value)
+          assert os.environ['GITHUB_REPOSITORY']=='NikNakk/threshold-wine-xr'
+          with open(os.environ['GITHUB_ENV'],'a') as stream:stream.write('VERSION='+value+'\n')
+          PY
+      - name: Install build dependencies
+        id: toolchain
+        run: |
+          brew install cmake ninja pkgconf bison mingw-w64 freetype gnutls vulkan-headers vulkan-loader molten-vk ripgrep
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          identity=$({ brew list --versions; xcrun clang --version; xcrun --show-sdk-version; } | shasum -a 256 | awk '{print $1}')
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.RELEASE_WORK }}/wine-sdk
+          key: bridge-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('release/inputs.json', 'release/build.sh') }}-${{ steps.toolchain.outputs.identity }}
+      - name: Check source and profile/package tests
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+          ctest --test-dir build --output-on-failure
+      - name: Build paired bridge and package reviewed payload
+        run: bash release/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: threshold-wine-xr-${{ env.VERSION }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    needs: build
+    if: github.ref_type == 'tag' || inputs.publish == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: threshold-wine-xr-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/*.tar.xz
+            dist/*.tar.gz
+            dist/threshold-release.json
+      - name: Publish immutable prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then tag="$GITHUB_REF_NAME"; else tag="threshold-$INPUT_VERSION"; fi
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then echo 'Choose a new version; release exists' >&2; exit 1; fi
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null || true)
+          [[ -z "$existing" || "$existing" == "$GITHUB_SHA" ]]
+          gh release create "$tag" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+            --title "Threshold Wine XR ${tag#threshold-}" --notes 'Paired Windows/macOS bridge preview for Windows Steam. Includes corresponding source, dependency pins, SHA256SUMS and threshold-release.json. Wine, DXMT, xrizer and Monado are supplied separately.'

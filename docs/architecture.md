@@ -6,6 +6,6 @@ D3D11 image import uses DXMT's explicit native interface to wrap runtime-owned M
 
 OpenVR applications reach OpenXR through a separately supplied xrizer. The ordinary Windows Steam client supplies the user's game-service integration. Steam does not supply the bridge's headset presentation path.
 
-Threshold XR is the installation/configuration UI and application launcher. It should select a versioned bridge component, Wine runtime, DXMT/xrizer paths and a compatible native OpenXR client. It should consume the same launch scripts or a future versioned CLI contract rather than duplicate bridge internals. This source preview does not yet publish a binary artifact or modify Threshold XR's dependency catalog.
+Threshold XR is the installation/configuration UI and application launcher. It should select a versioned bridge component, Wine runtime, DXMT/xrizer paths and a compatible native OpenXR client. It should consume the same launch scripts or a future versioned CLI contract rather than duplicate bridge internals. The release workflow emits paired artifacts under the `threshold-wine-xr` component; Threshold XR consumes that component separately from the private Steam integration.
 
 This repository is the canonical public home for the extracted bridge. Reviewed changes should land here. Private research can propose changes, but should not maintain a second release implementation. Interface identifiers and `MWXR_*` environment variables retain their existing names to avoid unnecessary ABI churn.
