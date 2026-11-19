@@ -120,7 +120,7 @@ XrResult wine_xrCreateInstance(const XrInstanceCreateInfo *info, XrInstance *ins
         pthread_mutex_unlock(&instance_mutex);
         return XR_ERROR_FEATURE_UNSUPPORTED;
     }
-    const char *native_names[16];
+    const char *native_names[20];
     uint32_t native_count = 0;
     if (wrapper->d3d11_enabled || wrapper->vulkan_enabled || wrapper->vulkan2_enabled) native_names[native_count++] = XR_KHR_METAL_ENABLE_EXTENSION_NAME;
     if (wrapper->win32_time_enabled) native_names[native_count++] = native_timespec_extension;
@@ -144,6 +144,32 @@ XrResult wine_xrCreateInstance(const XrInstanceCreateInfo *info, XrInstance *ins
         fprintf(stderr, "wineopenxr: gaze foveation %s\n",
                 wrapper->gaze_foveation == 1 ? "requested from the runtime" : "fixed (runtime has no foveation state)");
     }
+    const char *provider = getenv("MWXR_FOVEATION_PROVIDER");
+    if (provider && !strcmp(provider, "monado")) {
+        const char *positions = getenv("DXMT_RATE_MAP_POSITION"), *reads = getenv("DXMT_RATE_MAP_READ");
+        const char *stay = getenv("DXMT_STAY_WARPED");
+        // The final imported image is excluded from mapped passes only when
+        // the read/layout integration is active. Reject incomplete settings.
+        if (!positions || strcmp(positions, "1") || !reads || strcmp(reads, "1") || !stay || strcmp(stay, "external")) {
+            fprintf(stderr, "wineopenxr: Monado provider requires DXMT_RATE_MAP_POSITION=1 DXMT_RATE_MAP_READ=1 DXMT_STAY_WARPED=external\n");
+            pthread_mutex_unlock(&instance_mutex);
+            return XR_ERROR_FEATURE_UNSUPPORTED;
+        }
+        // Preserve application-owned explicit transport; this provider is only
+        // the bridge's opt-in implicit scene map source.
+        if (!wrapper->d3d11_enabled || wrapper->foveation_extensions || wrapper->foveation_d3d11_enabled ||
+            wrapper->gaze_foveation != 1 || !native_extension_present(XR_MNDX_FOVEATION_METAL_EXTENSION_NAME)) {
+            pthread_mutex_unlock(&instance_mutex);
+            return XR_ERROR_FEATURE_UNSUPPORTED;
+        }
+        const char *fixed = getenv("MWXR_GAZE_FOVEATION_FIXED");
+        if ((!fixed || strcmp(fixed, "1")) && !native_extension_present("XR_META_foveation_eye_tracked")) {
+            pthread_mutex_unlock(&instance_mutex);
+            return XR_ERROR_EXTENSION_NOT_PRESENT;
+        }
+        native_names[native_count++] = XR_MNDX_FOVEATION_METAL_EXTENSION_NAME;
+        wrapper->monado_foveation_provider = 1;
+    }
     XrInstanceCreateInfo native_info = *info;
     native_info.enabledExtensionCount = native_count;
     native_info.enabledExtensionNames = native_count ? native_names : NULL;
@@ -156,6 +182,17 @@ XrResult wine_xrCreateInstance(const XrInstanceCreateInfo *info, XrInstance *ins
         if (wrapper->foveation_d3d11_enabled)
             xrGetInstanceProcAddr(*instance, "xrGetFoveationMetalStateMNDX",
                                  (PFN_xrVoidFunction *)&wrapper->native_get_foveation_metal);
+        if (wrapper->monado_foveation_provider) {
+            result = xrGetInstanceProcAddr(*instance, "xrLookupFoveationMetalStateForExtentMNDX",
+                                          (PFN_xrVoidFunction *)&wrapper->native_lookup_foveation_extent);
+            if (XR_FAILED(result) || !wrapper->native_lookup_foveation_extent) {
+                xrDestroyInstance(*instance);
+                *instance = XR_NULL_HANDLE;
+                live_instance = XR_NULL_HANDLE;
+                pthread_mutex_unlock(&instance_mutex);
+                return XR_ERROR_FUNCTION_UNSUPPORTED;
+            }
+        }
         if (wrapper->win32_time_enabled) {
             xrGetInstanceProcAddr(*instance, "xrConvertTimespecTimeToTimeKHR",
                                   (PFN_xrVoidFunction *)&wrapper->native_timespec_to_time);

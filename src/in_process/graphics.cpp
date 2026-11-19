@@ -335,26 +335,20 @@ extern "C" XrResult mw_pe_cleanup_instance(wine_XrInstance *instance)
     if (active_session && active_session->instance == instance) return xrDestroySession((XrSession)active_session);
     return XR_SUCCESS;
 }
-// Acquired indices are released in FIFO order; only a copy fallback needs them.
-extern "C" XrResult WINAPI xrAcquireSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageAcquireInfo *info,
-                                                   uint32_t *index)
+// Prepare implicit Monado selection before acquiring an image. A provider or
+// binding failure must not turn a successful native acquire into a failed API
+// call while leaving an image hidden in the native/bridge FIFO.
+static XrResult prepare_gaze_frame_map(XrSwapchain swapchain)
 {
-    if (wine_swapchain_from_handle(swapchain)->session->vulkan) return mw_vk_acquire(swapchain, info, index);
     auto *wrapper = wine_swapchain_from_handle(swapchain);
     auto *state = (SwapState *)wrapper->graphics;
-    struct xrAcquireSwapchainImage_params params = {swapchain, info, index};
-    NTSTATUS status = UNIX_CALL(xrAcquireSwapchainImage, &params);
-    XrResult result = call_result(status, params.result);
-    if (XR_SUCCEEDED(result) && state->acquired && state->acquired_count < state->count)
-        state->acquired[(state->acquired_head + state->acquired_count++) % state->count] = *index;
-    // Once per frame, before the application records the passes for this image.
     auto *session = (SessionState *)wrapper->session->graphics;
     const bool eye_swapchain = session->eye_swapchains[1] &&
                                (swapchain == session->eye_swapchains[0] || swapchain == session->eye_swapchains[1]);
-    if (XR_SUCCEEDED(result) && wrapper->session->instance->gaze_foveation &&
+    if (wrapper->session->instance->gaze_foveation &&
         (swapchain == session->gaze_swapchain || eye_swapchain)) {
         mw_gaze_foveation_params gaze = {session->gaze_swapchain, wrapper->info.width, wrapper->info.height,
-            {session->gaze_rects[0], session->gaze_rects[1]}, {session->gaze_fovs[0], session->gaze_fovs[1]}, 0, XR_SUCCESS};
+            {session->gaze_rects[0], session->gaze_rects[1]}, {session->gaze_fovs[0], session->gaze_fovs[1]}, 0, XR_SUCCESS, {0, 1}};
         // One swapchain per eye (UEVR's Synchronized Sequential): the engine draws one eye per
         // frame, and UEVR acquires that eye's swapchain once it has drawn it, so the next frame
         // draws the other eye. While the acquires alternate, the map is that other eye's alone;
@@ -364,7 +358,10 @@ extern "C" XrResult WINAPI xrAcquireSwapchainImage(XrSwapchain swapchain, const 
             session->alternations = eye != session->last_eye ? session->alternations + 1 : 0;
             session->last_eye = eye;
             const int mode = session->alternations >= 8 ? 1 : 0;
-            if (mode) gaze.fovs[0] = gaze.fovs[1] = session->gaze_fovs[1 - eye];
+            if (mode) {
+                gaze.fovs[0] = gaze.fovs[1] = session->gaze_fovs[1 - eye];
+                gaze.view_indices[0] = gaze.view_indices[1] = 1 - eye;
+            }
             if (mode != session->eye_mode_logged) {
                 session->eye_mode_logged = mode;
                 fprintf(stderr, "wineopenxr: gaze foveation per eye: %s\n",
@@ -401,9 +398,43 @@ extern "C" XrResult WINAPI xrAcquireSwapchainImage(XrSwapchain swapchain, const 
             }
         }
         follow_scene_size(session, gaze);
-        if (!UNIX_CALL(mw_gaze_foveation, &gaze) && gaze.map != session->gaze_map &&
-            SUCCEEDED(session->interop->set_frame_rate_map((void *)gaze.map)))
-            session->gaze_map = gaze.map;
+        NTSTATUS status = UNIX_CALL(mw_gaze_foveation, &gaze);
+        if (wrapper->session->instance->monado_foveation_provider && (status || XR_FAILED(gaze.result))) {
+            session->interop->set_frame_rate_map(nullptr);
+            session->gaze_map = 0;
+            fprintf(stderr, "wineopenxr: Monado map provider failed: status=%lx result=%d\n", (long)status, gaze.result);
+            return XR_FAILED(gaze.result) ? gaze.result : XR_ERROR_RUNTIME_FAILURE;
+        }
+        if (!status && gaze.map != session->gaze_map) {
+            HRESULT hr = session->interop->set_frame_rate_map((void *)gaze.map);
+            if (FAILED(hr) && wrapper->session->instance->monado_foveation_provider) return XR_ERROR_RUNTIME_FAILURE;
+            if (SUCCEEDED(hr)) session->gaze_map = gaze.map;
+        }
+    }
+    return XR_SUCCESS;
+}
+
+// Acquired indices are released in FIFO order; only a copy fallback needs them.
+extern "C" XrResult WINAPI xrAcquireSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageAcquireInfo *info,
+                                                   uint32_t *index)
+{
+    if (wine_swapchain_from_handle(swapchain)->session->vulkan) return mw_vk_acquire(swapchain, info, index);
+    auto *wrapper = wine_swapchain_from_handle(swapchain);
+    auto *state = (SwapState *)wrapper->graphics;
+    const bool monado = wrapper->session->instance->monado_foveation_provider;
+    if (monado) {
+        XrResult prepared = prepare_gaze_frame_map(swapchain);
+        if (XR_FAILED(prepared)) return prepared;
+    }
+    struct xrAcquireSwapchainImage_params params = {swapchain, info, index};
+    NTSTATUS status = UNIX_CALL(xrAcquireSwapchainImage, &params);
+    XrResult result = call_result(status, params.result);
+    if (XR_SUCCEEDED(result) && state->acquired && state->acquired_count < state->count)
+        state->acquired[(state->acquired_head + state->acquired_count++) % state->count] = *index;
+    // Retain the legacy provider's ordering. Monado selection was prepared above.
+    if (XR_SUCCEEDED(result) && !monado) {
+        XrResult prepared = prepare_gaze_frame_map(swapchain);
+        if (XR_FAILED(prepared)) return prepared;
     }
     return result;
 }

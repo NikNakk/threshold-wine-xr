@@ -30,6 +30,18 @@ typedef struct XrFoveationMetalStateMNDX {
 } XrFoveationMetalStateMNDX;
 typedef XrResult (XRAPI_PTR *PFN_xrGetFoveationMetalStateMNDX)(XrSwapchain, uint32_t, uint32_t,
                                                             XrFoveationMetalStateMNDX *);
+// Additive Monado v4 lookup: target extents do not select final-image reconstruction.
+#define XR_TYPE_FOVEATION_METAL_PACKED_STATE_MNDX ((XrStructureType)0x7fff5058)
+typedef struct { uint32_t viewIndex; XrRect2Di imageRect; } XrFoveationMetalViewMNDX;
+typedef struct {
+    XrStructureType type; void *next;
+    uint32_t viewCount; const XrFoveationMetalViewMNDX *views;
+    uint32_t horizontalSampleCount, verticalSampleCount;
+    float horizontalSampleRates[16], verticalSampleRates[16];
+    uint32_t boundaryCount; float x[129], y[129];
+} XrFoveationMetalPackedStateMNDX;
+typedef XrResult (XRAPI_PTR *PFN_xrLookupFoveationMetalStateForExtentMNDX)(
+    XrSwapchain, uint32_t, uint32_t, uint32_t, uint32_t, XrFoveationMetalStateMNDX *);
 // MWXR_GAZE_FOVEATION: once per frame for the projection swapchain. Returns a borrowed
 // MTLRasterizationRateMap over the whole packed target (0: render ordinary).
 struct mw_gaze_foveation_params {
@@ -39,6 +51,7 @@ struct mw_gaze_foveation_params {
     XrFovf fovs[2];
     uint64_t map;
     XrResult result;
+    uint32_t view_indices[2];
 };
 struct mw_foveation_params {
     XrSwapchain swapchain;

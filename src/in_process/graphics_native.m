@@ -249,8 +249,9 @@ XrResult wine_xrReleaseSwapchainImage(XrSwapchain swapchain, const XrSwapchainIm
 #include <math.h>
 static struct {
     wine_XrSession *session; XrSession host_session; XrFoveationProfileFB profile;
-    int eye_tracked, configured, force_fixed, test;
+    int eye_tracked, configured, force_fixed, test, runtime_valid;
     float outer, core, edge, step, yaw, pitch; int have_gaze, mode; unsigned invalid_calls, built; uint64_t calls;
+    id<MTLRasterizationRateMap> runtime_map;
     NSMutableDictionary *maps; uint64_t current; int valid_logged;
     uint32_t logged_width, logged_height; int32_t logged_extent;
 } gaze;
@@ -261,7 +262,7 @@ static void gaze_forget_session(wine_XrSession *session)
 {
     if (gaze.session != session) return;
     if (gaze.profile) g_xr_host_instance_dispatch_table.p_xrDestroyFoveationProfileFB(gaze.profile);
-    @autoreleasepool { [gaze.maps release]; }
+    @autoreleasepool { [gaze.maps release]; [gaze.runtime_map release]; }
     memset(&gaze, 0, sizeof(gaze));
 }
 static float gaze_rate(float delta, float core, float edge, float outer)
@@ -366,6 +367,65 @@ static id<MTLRasterizationRateMap> gaze_build(id<MTLDevice> device, const struct
     [layer release];
     return map;
 }
+// Runtime-owned policy and map construction. This path never calls the
+// selecting Get transport: DXMT reconstructs the final ordinary output itself.
+static int32_t runtime_gaze_foveation(struct mw_gaze_foveation_params *p, wine_XrSwapchain *swap,
+                                     wine_XrSession *session, id<MTLDevice> device)
+{
+    @autoreleasepool {
+        if (gaze.session != session || gaze.host_session != session->host_session) {
+            [gaze.maps release]; [gaze.runtime_map release];
+            memset(&gaze, 0, sizeof(gaze));
+            gaze.session = session; gaze.host_session = session->host_session;
+            const char *fixed = getenv("MWXR_GAZE_FOVEATION_FIXED");
+            gaze.force_fixed = fixed && !strcmp(fixed, "1");
+        }
+        if (!gaze.profile) {
+            XrFoveationEyeTrackedProfileCreateInfoMETA eye = {XR_TYPE_FOVEATION_EYE_TRACKED_PROFILE_CREATE_INFO_META};
+            XrFoveationLevelProfileCreateInfoFB level = {XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB,
+                gaze.force_fixed ? NULL : &eye, XR_FOVEATION_LEVEL_HIGH_FB, 0.f, XR_FOVEATION_DYNAMIC_DISABLED_FB};
+            XrFoveationProfileCreateInfoFB info = {XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB, &level};
+            p->result = g_xr_host_instance_dispatch_table.p_xrCreateFoveationProfileFB(session->host_session, &info, &gaze.profile);
+            if (XR_FAILED(p->result)) return 0;
+        }
+        XrSwapchainStateFoveationFB update = {XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB, NULL, 0, gaze.profile};
+        p->result = g_xr_host_instance_dispatch_table.p_xrUpdateSwapchainFB(swap->host_swapchain,
+                                                                        (const XrSwapchainStateBaseHeaderFB *)&update);
+        if (XR_FAILED(p->result)) return 0;
+        XrFoveationMetalViewMNDX views[2] = {{p->view_indices[0], p->rects[0]}, {p->view_indices[1], p->rects[1]}};
+        XrFoveationMetalPackedStateMNDX packed = {0};
+        packed.type = XR_TYPE_FOVEATION_METAL_PACKED_STATE_MNDX; packed.viewCount = 2; packed.views = views;
+        XrFoveationMetalStateMNDX state = {XR_TYPE_FOVEATION_METAL_STATE_MNDX, &packed};
+        PFN_xrLookupFoveationMetalStateForExtentMNDX lookup = session->instance->native_lookup_foveation_extent;
+        p->result = lookup(swap->host_swapchain, 0, 0, p->width, p->height, &state);
+        if (XR_FAILED(p->result)) return 0;
+        id<MTLRasterizationRateMap> map = state.foveationEnabled ? (id<MTLRasterizationRateMap>)state.rasterizationRateMap : nil;
+        if (state.foveationEnabled && (!map || map.device.registryID != device.registryID || map.layerCount != 1 ||
+            map.screenSize.width != p->width || map.screenSize.height != p->height)) {
+            p->result = XR_ERROR_GRAPHICS_DEVICE_INVALID;
+            return 0;
+        }
+        int gaze_valid = -1;
+        if (!gaze.force_fixed) {
+            XrFoveationEyeTrackedStateMETA eye_state = {XR_TYPE_FOVEATION_EYE_TRACKED_STATE_META};
+            if (XR_SUCCEEDED(g_xr_host_instance_dispatch_table.p_xrGetFoveationEyeTrackedStateMETA(session->host_session, &eye_state)))
+                gaze_valid = !!(eye_state.flags & XR_FOVEATION_EYE_TRACKED_STATE_VALID_BIT_META);
+        }
+        // Own a snapshot across future policy updates/lookups and the PE call.
+        const int changed = map != gaze.runtime_map;
+        [map retain]; [gaze.runtime_map release]; gaze.runtime_map = map;
+        p->map = (uint64_t)map;
+        if (gaze.calls++ == 0 || changed || gaze_valid != gaze.runtime_valid || gaze.logged_width != p->width || gaze.logged_height != p->height) {
+            gaze.logged_width = p->width; gaze.logged_height = p->height;
+            fprintf(stderr, "wineopenxr: Monado map provider target=%ux%u physical=%ux%u revision=%u gaze=%s valid=%d\n",
+                    p->width, p->height, state.physicalWidth, state.physicalHeight, state.revision,
+                    gaze.force_fixed ? "fixed" : "runtime", gaze_valid);
+            gaze.runtime_valid = gaze_valid;
+        }
+    }
+    return 0;
+}
+
 int32_t mw_gaze_foveation_call(void *args)
 {
     struct mw_gaze_foveation_params *p = args;
@@ -374,7 +434,12 @@ int32_t mw_gaze_foveation_call(void *args)
     wine_XrSession *session = swap->session;
     id<MTLDevice> device = (id<MTLDevice>)session->metal_device;
     if (!session->instance->gaze_foveation || !device || !p->width || !p->height ||
-        ![device supportsRasterizationRateMapWithLayerCount:1]) return 0;
+        ![device supportsRasterizationRateMapWithLayerCount:1]) {
+        if (session->instance->monado_foveation_provider) p->result = XR_ERROR_FEATURE_UNSUPPORTED;
+        return 0;
+    }
+    if (session->instance->monado_foveation_provider)
+        return runtime_gaze_foveation(p, swap, session, device);
     @autoreleasepool {
         if (gaze.session != session || gaze.host_session != session->host_session) {
             if (gaze.profile && gaze.host_session == session->host_session)

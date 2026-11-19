@@ -58,6 +58,8 @@ typedef struct { XrInstance host_instance; void *required_metal_device; uint32_t
     uint32_t visibility_mask_enabled; // XR_KHR_visibility_mask, passed through natively
     uint32_t foveation_extensions, foveation_d3d11_enabled;
     void *native_get_foveation_metal;
+    void *native_lookup_foveation_extent;
+    uint32_t monado_foveation_provider;
     uint32_t gaze_foveation; // MWXR_GAZE_FOVEATION: bridge-built rate maps centred on Monado gaze
 } wine_XrInstance;
 typedef struct { XrSession host_session; wine_XrInstance *instance; void *metal_device;
