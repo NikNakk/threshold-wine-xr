@@ -390,6 +390,22 @@ static int32_t runtime_angular_foveation(struct mw_gaze_foveation_params *p, win
             XrFoveationMetalAngularProfileCreateInfoMNDX angular = {
                 XR_TYPE_FOVEATION_METAL_ANGULAR_PROFILE_CREATE_INFO_MNDX, NULL,
                 gaze.outer,gaze.core,gaze.edge,gaze.step,!gaze.force_fixed};
+            XrFoveationMetalAngularShapeCreateInfoMNDX shape = {
+                XR_TYPE_FOVEATION_METAL_ANGULAR_SHAPE_CREATE_INFO_MNDX,NULL,XR_FOVEATION_METAL_ANGULAR_SHAPE_SMOOTHSTEP_MNDX,15.f};
+            const char *name=getenv("MWXR_ANGULAR_PROFILE"), *sigma=getenv("MWXR_ANGULAR_SIGMA_DEGREES");
+            if (name && strcmp(name,"smoothstep")) {
+                if (!strcmp(name,"gaussian-clamped")) shape.shape=XR_FOVEATION_METAL_ANGULAR_SHAPE_GAUSSIAN_CLAMPED_MNDX;
+                else if (!strcmp(name,"gaussian-floor")) shape.shape=XR_FOVEATION_METAL_ANGULAR_SHAPE_GAUSSIAN_FLOOR_MNDX;
+                else if (!strcmp(name,"gaussian-core")) shape.shape=XR_FOVEATION_METAL_ANGULAR_SHAPE_GAUSSIAN_CORE_MNDX;
+                else { p->result=XR_ERROR_VALIDATION_FAILURE; return 0; }
+                if (sigma) {
+                    char *end=NULL; shape.sigmaDegrees=strtof(sigma,&end);
+                    if (end==sigma || *end || !isfinite(shape.sigmaDegrees)) { p->result=XR_ERROR_VALIDATION_FAILURE; return 0; }
+                }
+                angular.next=&shape;
+            }
+            if (sigma && (!name || !strcmp(name,"smoothstep"))) { p->result=XR_ERROR_VALIDATION_FAILURE; return 0; }
+            fprintf(stderr,"wineopenxr: angular shape=%s sigma=%.6g degrees\n",name?name:"smoothstep",shape.sigmaDegrees);
             XrFoveationProfileCreateInfoFB info = {XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB,&angular};
             p->result=g_xr_host_instance_dispatch_table.p_xrCreateFoveationProfileFB(session->host_session,&info,&gaze.profile);
             if(XR_FAILED(p->result)) return 0;

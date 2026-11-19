@@ -100,3 +100,22 @@ typedef struct XrFoveationMetalAngularDiagnosticsMNDX {
 typedef XrResult (XRAPI_PTR *PFN_xrLookupFoveationMetalAngularStateMNDX)(
  XrFoveationProfileFB profile, const XrFoveationMetalAngularLookupInfoMNDX* info,
  XrFoveationMetalStateMNDX* state);
+
+/* Version 6: optional shape chain on AngularProfileCreateInfoMNDX. Absent
+ * means legacy smoothstep, preserving every v5 field and default. Gaussian
+ * sigma is in degrees (.25..180); gaze filtering/cache/rendering are unchanged.
+ * Gaussian-core uses the existing active core (20 degrees for fixed/fallback).
+ */
+#define XR_TYPE_FOVEATION_METAL_ANGULAR_SHAPE_CREATE_INFO_MNDX ((XrStructureType)0x7fff505d)
+typedef enum XrFoveationMetalAngularShapeMNDX {
+ XR_FOVEATION_METAL_ANGULAR_SHAPE_SMOOTHSTEP_MNDX = 0,
+ XR_FOVEATION_METAL_ANGULAR_SHAPE_GAUSSIAN_CLAMPED_MNDX = 1,
+ XR_FOVEATION_METAL_ANGULAR_SHAPE_GAUSSIAN_FLOOR_MNDX = 2,
+ XR_FOVEATION_METAL_ANGULAR_SHAPE_GAUSSIAN_CORE_MNDX = 3,
+ XR_FOVEATION_METAL_ANGULAR_SHAPE_MAX_ENUM_MNDX = 0x7fffffff
+} XrFoveationMetalAngularShapeMNDX;
+typedef struct XrFoveationMetalAngularShapeCreateInfoMNDX {
+ XrStructureType type; const void*  next;
+ XrFoveationMetalAngularShapeMNDX shape;
+ float sigmaDegrees;
+} XrFoveationMetalAngularShapeCreateInfoMNDX;
