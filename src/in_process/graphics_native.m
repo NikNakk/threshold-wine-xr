@@ -367,6 +367,57 @@ static id<MTLRasterizationRateMap> gaze_build(id<MTLDevice> device, const struct
     [layer release];
     return map;
 }
+// Angular v5: the bridge passes render geometry; Monado owns gaze filtering,
+// profile evaluation and the map cache. No FB swapchain update/selecting query.
+static int32_t runtime_angular_foveation(struct mw_gaze_foveation_params *p, wine_XrSession *session,
+                                        id<MTLDevice> device)
+{
+    @autoreleasepool {
+        if (gaze.session != session || gaze.host_session != session->host_session) {
+            [gaze.maps release]; [gaze.runtime_map release]; memset(&gaze, 0, sizeof(gaze));
+            gaze.session = session; gaze.host_session = session->host_session;
+            const char *fixed = getenv("MWXR_GAZE_FOVEATION_FIXED"), *trace = getenv("MWXR_FOVEATION_TRACE");
+            gaze.force_fixed = fixed && !strcmp(fixed, "1");
+            gaze.runtime_trace = trace && !strcmp(trace, "1");
+            gaze.outer=.3f; gaze.core=12.f; gaze.edge=27.f; gaze.step=2.f;
+            const char *text=getenv("MWXR_GAZE_FOVEATION");
+            if(text) sscanf(text,"%f,%f,%f,%f",&gaze.outer,&gaze.core,&gaze.edge,&gaze.step);
+            gaze.outer=fmaxf(.1f,fminf(1.f,gaze.outer)); gaze.step=fmaxf(.25f,fminf(10.f,gaze.step));
+            gaze.core=fmaxf(1.f,gaze.core); gaze.edge=fmaxf(gaze.core+1.f,gaze.edge);
+            fprintf(stderr,"wineopenxr: Monado angular map provider active (%s)\n",gaze.force_fixed?"fixed":"runtime gaze");
+        }
+        if(!gaze.profile) {
+            XrFoveationMetalAngularProfileCreateInfoMNDX angular = {
+                XR_TYPE_FOVEATION_METAL_ANGULAR_PROFILE_CREATE_INFO_MNDX, NULL,
+                gaze.outer,gaze.core,gaze.edge,gaze.step,!gaze.force_fixed};
+            XrFoveationProfileCreateInfoFB info = {XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB,&angular};
+            p->result=g_xr_host_instance_dispatch_table.p_xrCreateFoveationProfileFB(session->host_session,&info,&gaze.profile);
+            if(XR_FAILED(p->result)) return 0;
+        }
+        XrFoveationMetalAngularLookupInfoMNDX info={XR_TYPE_FOVEATION_METAL_ANGULAR_LOOKUP_INFO_MNDX};
+        info.width=p->width; info.height=p->height; info.referenceViewIndex=p->view_indices[0];
+        for(unsigned i=0;i<2;++i) { info.views[i].imageRect=p->rects[i]; info.views[i].fov=p->fovs[i]; }
+        XrFoveationMetalAngularDiagnosticsMNDX diag={XR_TYPE_FOVEATION_METAL_ANGULAR_DIAGNOSTICS_MNDX};
+        XrFoveationMetalStateMNDX state={XR_TYPE_FOVEATION_METAL_STATE_MNDX,gaze.runtime_trace?&diag:NULL};
+        PFN_xrLookupFoveationMetalAngularStateMNDX lookup=session->instance->native_lookup_foveation_extent;
+        p->result=lookup(gaze.profile,&info,&state); if(XR_FAILED(p->result)) return 0;
+        id<MTLRasterizationRateMap> map=state.foveationEnabled?(id<MTLRasterizationRateMap>)state.rasterizationRateMap:nil;
+        if(state.foveationEnabled && (!map || map.device.registryID!=device.registryID || map.layerCount!=1 ||
+            map.screenSize.width!=p->width || map.screenSize.height!=p->height)) { p->result=XR_ERROR_GRAPHICS_DEVICE_INVALID; return 0; }
+        int changed=map!=gaze.runtime_map;
+        if(changed) { [map retain]; [gaze.runtime_map release]; gaze.runtime_map=map; }
+        p->map=(uint64_t)map;
+        if(gaze.runtime_trace && (!gaze.calls || changed || gaze.runtime_valid!=(int)diag.gazeValid ||
+            gaze.logged_width!=p->width || gaze.logged_height!=p->height)) {
+            fprintf(stderr,"wineopenxr: Monado map provider target=%ux%u physical=%ux%u revision=%u gaze=%s valid=%d angular=1 held=%u builds=%u\n",
+                p->width,p->height,state.physicalWidth,state.physicalHeight,state.revision,
+                gaze.force_fixed?"fixed":"runtime",(int)diag.gazeValid,diag.hasGaze,diag.buildCount);
+            gaze.runtime_valid=diag.gazeValid; gaze.logged_width=p->width; gaze.logged_height=p->height;
+        }
+        ++gaze.calls;
+    }
+    return 0;
+}
 // Runtime-owned policy and map construction. This path never calls the
 // selecting Get transport: DXMT reconstructs the final ordinary output itself.
 static int32_t runtime_gaze_foveation(struct mw_gaze_foveation_params *p, wine_XrSwapchain *swap,
@@ -449,6 +500,8 @@ int32_t mw_gaze_foveation_call(void *args)
         if (session->instance->monado_foveation_provider) p->result = XR_ERROR_FEATURE_UNSUPPORTED;
         return 0;
     }
+    if (session->instance->monado_foveation_provider == 2)
+        return runtime_angular_foveation(p, session, device);
     if (session->instance->monado_foveation_provider)
         return runtime_gaze_foveation(p, swap, session, device);
     @autoreleasepool {

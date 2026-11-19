@@ -60,3 +60,43 @@ struct mw_foveation_params {
     uint64_t map;
     XrResult result;
 };
+
+// Additive Monado v5 angular profile ABI (BSL-1.0, Nick Kennedy).
+#define XR_TYPE_FOVEATION_METAL_ANGULAR_PROFILE_CREATE_INFO_MNDX ((XrStructureType)0x7fff505a)
+#define XR_TYPE_FOVEATION_METAL_ANGULAR_LOOKUP_INFO_MNDX ((XrStructureType)0x7fff505b)
+#define XR_TYPE_FOVEATION_METAL_ANGULAR_DIAGNOSTICS_MNDX ((XrStructureType)0x7fff505c)
+typedef struct XrFoveationMetalAngularProfileCreateInfoMNDX {
+ XrStructureType type; const void*  next;
+ float peripheralRate; /* finite, .1..1 */
+ float coreAngleDegrees; /* >=1 */
+ float transitionAngleDegrees; /* >=core+1 */
+ float gazeStepDegrees; /* .25..10 */
+ XrBool32 eyeTracked;
+} XrFoveationMetalAngularProfileCreateInfoMNDX;
+typedef struct XrFoveationMetalAngularViewMNDX {
+ XrRect2Di imageRect;
+ XrFovf fov;
+} XrFoveationMetalAngularViewMNDX;
+typedef struct XrFoveationMetalAngularLookupInfoMNDX {
+ XrStructureType type; const void*  next;
+ uint32_t width, height; /* 1..16384 */
+ uint32_t referenceViewIndex;
+ XrFoveationMetalAngularViewMNDX views[2]; /* actual render FOVs, may overlap */
+} XrFoveationMetalAngularLookupInfoMNDX;
+typedef struct XrFoveationMetalAngularDiagnosticsMNDX {
+ XrStructureType type; void*  next;
+ XrBool32 gazeValid, hasGaze;
+ float yawDegrees, pitchDegrees;
+ uint32_t buildCount, cacheCount;
+ float horizontalSampleRates[64], verticalSampleRates[32];
+} XrFoveationMetalAngularDiagnosticsMNDX;
+/* Runtime-owned native Metal object; borrowed until next successful lookup on
+ * this profile or profile destruction. Retain for longer use. No compositor
+ * selection or swapchain state changes. Failure preserves history and borrow.
+ * state.next may point to angular diagnostics only; previous structs unchanged.
+ * Normalized runtime gaze of referenceViewIndex is interpreted through views[0]
+ * render FOV, matching the legacy DXMT angular policy. No raw gaze ray exposed.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrLookupFoveationMetalAngularStateMNDX)(
+ XrFoveationProfileFB profile, const XrFoveationMetalAngularLookupInfoMNDX* info,
+ XrFoveationMetalStateMNDX* state);

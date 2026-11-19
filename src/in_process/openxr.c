@@ -145,7 +145,7 @@ XrResult wine_xrCreateInstance(const XrInstanceCreateInfo *info, XrInstance *ins
                 wrapper->gaze_foveation == 1 ? "requested from the runtime" : "fixed (runtime has no foveation state)");
     }
     const char *provider = getenv("MWXR_FOVEATION_PROVIDER");
-    if (provider && !strcmp(provider, "monado")) {
+    if (provider && (!strcmp(provider, "monado") || !strcmp(provider, "monado-angular"))) {
         const char *positions = getenv("DXMT_RATE_MAP_POSITION"), *reads = getenv("DXMT_RATE_MAP_READ");
         const char *stay = getenv("DXMT_STAY_WARPED");
         // The final imported image is excluded from mapped passes only when
@@ -168,7 +168,7 @@ XrResult wine_xrCreateInstance(const XrInstanceCreateInfo *info, XrInstance *ins
             return XR_ERROR_EXTENSION_NOT_PRESENT;
         }
         native_names[native_count++] = XR_MNDX_FOVEATION_METAL_EXTENSION_NAME;
-        wrapper->monado_foveation_provider = 1;
+        wrapper->monado_foveation_provider = !strcmp(provider, "monado-angular") ? 2 : 1;
     }
     XrInstanceCreateInfo native_info = *info;
     native_info.enabledExtensionCount = native_count;
@@ -183,7 +183,8 @@ XrResult wine_xrCreateInstance(const XrInstanceCreateInfo *info, XrInstance *ins
             xrGetInstanceProcAddr(*instance, "xrGetFoveationMetalStateMNDX",
                                  (PFN_xrVoidFunction *)&wrapper->native_get_foveation_metal);
         if (wrapper->monado_foveation_provider) {
-            result = xrGetInstanceProcAddr(*instance, "xrLookupFoveationMetalStateForExtentMNDX",
+            result = xrGetInstanceProcAddr(*instance, wrapper->monado_foveation_provider == 2 ?
+                "xrLookupFoveationMetalAngularStateMNDX" : "xrLookupFoveationMetalStateForExtentMNDX",
                                           (PFN_xrVoidFunction *)&wrapper->native_lookup_foveation_extent);
             if (XR_FAILED(result) || !wrapper->native_lookup_foveation_extent) {
                 xrDestroyInstance(*instance);
