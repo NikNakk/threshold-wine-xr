@@ -249,7 +249,7 @@ XrResult wine_xrReleaseSwapchainImage(XrSwapchain swapchain, const XrSwapchainIm
 #include <math.h>
 static struct {
     wine_XrSession *session; XrSession host_session; XrFoveationProfileFB profile;
-    int eye_tracked, configured, force_fixed, test, runtime_valid;
+    int eye_tracked, configured, force_fixed, test, runtime_valid, runtime_trace;
     float outer, core, edge, step, yaw, pitch; int have_gaze, mode; unsigned invalid_calls, built; uint64_t calls;
     id<MTLRasterizationRateMap> runtime_map;
     NSMutableDictionary *maps; uint64_t current; int valid_logged;
@@ -379,6 +379,9 @@ static int32_t runtime_gaze_foveation(struct mw_gaze_foveation_params *p, wine_X
             gaze.session = session; gaze.host_session = session->host_session;
             const char *fixed = getenv("MWXR_GAZE_FOVEATION_FIXED");
             gaze.force_fixed = fixed && !strcmp(fixed, "1");
+            const char *trace = getenv("MWXR_FOVEATION_TRACE");
+            gaze.runtime_trace = trace && !strcmp(trace, "1");
+            fprintf(stderr, "wineopenxr: Monado map provider active (%s)\n", gaze.force_fixed ? "fixed" : "runtime gaze");
         }
         if (!gaze.profile) {
             XrFoveationEyeTrackedProfileCreateInfoMETA eye = {XR_TYPE_FOVEATION_EYE_TRACKED_PROFILE_CREATE_INFO_META};
@@ -388,10 +391,17 @@ static int32_t runtime_gaze_foveation(struct mw_gaze_foveation_params *p, wine_X
             p->result = g_xr_host_instance_dispatch_table.p_xrCreateFoveationProfileFB(session->host_session, &info, &gaze.profile);
             if (XR_FAILED(p->result)) return 0;
         }
-        XrSwapchainStateFoveationFB update = {XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB, NULL, 0, gaze.profile};
-        p->result = g_xr_host_instance_dispatch_table.p_xrUpdateSwapchainFB(swap->host_swapchain,
-                                                                        (const XrSwapchainStateBaseHeaderFB *)&update);
-        if (XR_FAILED(p->result)) return 0;
+        // Fixed policy has no per-frame input to refresh. Applying it again
+        // would repeat FOV/transport work without changing a map. Tracked
+        // policy still refreshes every frame until the runtime samples it as
+        // part of its frame lifecycle.
+        if (!gaze.force_fixed || !swap->monado_profile_applied) {
+            XrSwapchainStateFoveationFB update = {XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB, NULL, 0, gaze.profile};
+            p->result = g_xr_host_instance_dispatch_table.p_xrUpdateSwapchainFB(swap->host_swapchain,
+                                                                            (const XrSwapchainStateBaseHeaderFB *)&update);
+            if (XR_FAILED(p->result)) return 0;
+            swap->monado_profile_applied = 1;
+        }
         XrFoveationMetalViewMNDX views[2] = {{p->view_indices[0], p->rects[0]}, {p->view_indices[1], p->rects[1]}};
         XrFoveationMetalPackedStateMNDX packed = {0};
         packed.type = XR_TYPE_FOVEATION_METAL_PACKED_STATE_MNDX; packed.viewCount = 2; packed.views = views;
@@ -406,22 +416,23 @@ static int32_t runtime_gaze_foveation(struct mw_gaze_foveation_params *p, wine_X
             return 0;
         }
         int gaze_valid = -1;
-        if (!gaze.force_fixed) {
+        if (gaze.runtime_trace && !gaze.force_fixed) {
             XrFoveationEyeTrackedStateMETA eye_state = {XR_TYPE_FOVEATION_EYE_TRACKED_STATE_META};
             if (XR_SUCCEEDED(g_xr_host_instance_dispatch_table.p_xrGetFoveationEyeTrackedStateMETA(session->host_session, &eye_state)))
                 gaze_valid = !!(eye_state.flags & XR_FOVEATION_EYE_TRACKED_STATE_VALID_BIT_META);
         }
         // Own a snapshot across future policy updates/lookups and the PE call.
         const int changed = map != gaze.runtime_map;
-        [map retain]; [gaze.runtime_map release]; gaze.runtime_map = map;
+        if (changed) { [map retain]; [gaze.runtime_map release]; gaze.runtime_map = map; }
         p->map = (uint64_t)map;
-        if (gaze.calls++ == 0 || changed || gaze_valid != gaze.runtime_valid || gaze.logged_width != p->width || gaze.logged_height != p->height) {
+        if (gaze.runtime_trace && (gaze.calls == 0 || changed || gaze_valid != gaze.runtime_valid || gaze.logged_width != p->width || gaze.logged_height != p->height)) {
             gaze.logged_width = p->width; gaze.logged_height = p->height;
             fprintf(stderr, "wineopenxr: Monado map provider target=%ux%u physical=%ux%u revision=%u gaze=%s valid=%d\n",
                     p->width, p->height, state.physicalWidth, state.physicalHeight, state.revision,
                     gaze.force_fixed ? "fixed" : "runtime", gaze_valid);
             gaze.runtime_valid = gaze_valid;
         }
+        ++gaze.calls;
     }
     return 0;
 }
