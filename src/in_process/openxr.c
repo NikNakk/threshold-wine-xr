@@ -5,6 +5,8 @@
 #pragma makedep unix
 #endif
 #include "openxr_private.h"
+#include "bridge_log.h"
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,8 +16,42 @@ struct openxr_instance_funcs g_xr_host_instance_dispatch_table;
 static XrInstance live_instance;
 static pthread_mutex_t instance_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+int mw_log_call(void *args)
+{
+    const struct mw_log_params *params = args;
+    size_t length = strlen(params->text);
+    for (const char *text = params->text; length;) {
+        ssize_t written = write(STDERR_FILENO, text, length);
+        if (written <= 0) break;
+        text += written;
+        length -= (size_t)written;
+    }
+    return 0;
+}
+
+// MWXR_LOG_FILE names a file that fd 2 is appended to from here on; see bridge_log.h.
+// A relative name is placed in the Steam game's compatdata folder when there is one, since
+// a launcher such as NotProton can name a file but not the folder each game gets.
+static void open_log_file(void)
+{
+    const char *name = getenv("MWXR_LOG_FILE"), *compat = getenv("STEAM_COMPAT_DATA_PATH");
+    if (!name || !name[0]) return;
+    char path[4096];
+    if (name[0] != '/' && compat && compat[0]) snprintf(path, sizeof(path), "%s/%s", compat, name);
+    else snprintf(path, sizeof(path), "%s", name);
+    int fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+    if (fd < 0) { fprintf(stderr, "wineopenxr: cannot open MWXR_LOG_FILE %s\n", path); return; }
+    if (fd != STDERR_FILENO) { dup2(fd, STDERR_FILENO); close(fd); }
+    char stamp[32] = "";
+    time_t now = time(NULL);
+    struct tm local;
+    if (localtime_r(&now, &local)) strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", &local);
+    fprintf(stderr, "=== wineopenxr log %s ===\n", stamp);
+}
+
 NTSTATUS init_openxr(void *args)
 {
+    open_log_file();
     const char *manifest = getenv("MWXR_NATIVE_RUNTIME_JSON");
     if (manifest && manifest[0] && setenv("XR_RUNTIME_JSON", manifest, 1)) return STATUS_UNSUCCESSFUL;
     fprintf(stderr, "wineopenxr: in-process native loader, pid=%d, D3D11/Vulkan to Metal, direct objects required\n", getpid());

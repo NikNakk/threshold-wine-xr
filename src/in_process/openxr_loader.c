@@ -2,7 +2,21 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // PE manual entry points, following Proton's loader/unixlib structure.
 #include "openxr_loader.h"
+#include "bridge_log.h"
+#include <stdarg.h>
+#include <stdio.h>
 extern XrResult WINAPI xrApplyFoveationD3D11MWXR(XrSwapchain, uint32_t, XrFoveationD3D11StateMWXR *);
+
+void mw_log(const char *format, ...)
+{
+    char text[1024];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(text, sizeof(text), format, args);
+    va_end(args);
+    struct mw_log_params params = {text};
+    UNIX_CALL(mw_log, &params);
+}
 
 BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, void *reserved)
 {

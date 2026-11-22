@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // DXMT backend: IDXMTNativeDevice2 retains the exact native Metal objects.
 #include "graphics_interop.h"
+#include "bridge_log.h"
 #include "graphics_interop_native.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,9 +42,9 @@ public:
         if (SUCCEEDED(hr) && boundary && !strcmp(boundary, "1")) {
             if (FAILED(device->QueryInterface(DXMT_IID_NATIVE_DEVICE4, (void **)&frames))) {
                 frames = nullptr;
-                fprintf(stderr, "wineopenxr: DXMT has no IDXMTNativeDevice4; frame boundaries are off\n");
+                mw_log("wineopenxr: DXMT has no IDXMTNativeDevice4; frame boundaries are off\n");
             } else {
-                fprintf(stderr, "wineopenxr: DXMT frame boundary at each xrEndFrame\n");
+                mw_log("wineopenxr: DXMT frame boundary at each xrEndFrame\n");
             }
         }
         return hr;
@@ -126,7 +127,7 @@ HRESULT mw_graphics_open_dxmt(ID3D11Device *device, const GraphicsNativeHost &ho
     if (!interop) return E_OUTOFMEMORY;
     HRESULT hr = interop->init(device);
     if (hr != S_OK) {
-        if (FAILED(hr)) fprintf(stderr, "wineopenxr: ERROR DXMT direct-object interface/context unavailable hr=%#lx\n", hr);
+        if (FAILED(hr)) mw_log("wineopenxr: ERROR DXMT direct-object interface/context unavailable hr=%#lx\n", hr);
         delete interop;
         return hr;
     }

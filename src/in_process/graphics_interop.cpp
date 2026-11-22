@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Backend selection for the renderer-neutral graphics interop layer.
 #include "graphics_interop.h"
+#include "bridge_log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,7 +43,7 @@ static void log_selection(GraphicsInterop *interop, const char *mode)
 {
     char caps[256];
     mw_graphics_format_caps(interop->capabilities(), caps, sizeof(caps));
-    fprintf(stderr, "wineopenxr: graphics backend=%s selection=%s device=%p caps=%s\n",
+    mw_log("wineopenxr: graphics backend=%s selection=%s device=%p caps=%s\n",
             interop->name(), mode, interop->metal_device(), caps);
 }
 
@@ -52,12 +53,12 @@ HRESULT mw_graphics_interop_open(ID3D11Device *device, const GraphicsNativeHost 
     const char *mode = getenv("MWXR_GRAPHICS_BACKEND");
     if (!mode || !mode[0]) mode = "auto";
     if (strcmp(mode, "auto") && strcmp(mode, "dxmt")) {
-        fprintf(stderr, "wineopenxr: ERROR MWXR_GRAPHICS_BACKEND=%s; use auto or dxmt\n", mode);
+        mw_log("wineopenxr: ERROR MWXR_GRAPHICS_BACKEND=%s; use auto or dxmt\n", mode);
         return E_INVALIDARG;
     }
     HRESULT hr = mw_graphics_open_dxmt(device, host, out);
     if (hr == S_FALSE) {
-        fprintf(stderr, "wineopenxr: ERROR no graphics backend (selection=%s) recognises this D3D11 device\n", mode);
+        mw_log("wineopenxr: ERROR no graphics backend (selection=%s) recognises this D3D11 device\n", mode);
         return E_NOINTERFACE;
     }
     if (SUCCEEDED(hr)) log_selection(*out, mode);

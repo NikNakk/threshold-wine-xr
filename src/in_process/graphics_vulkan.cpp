@@ -3,6 +3,7 @@
 // All Vulkan calls use Wine's PE Vulkan API. Only opaque Metal objects cross
 // the unix boundary: Wine's dispatchable Vulkan handles must never do so.
 #include "graphics_vulkan.h"
+#include "bridge_log.h"
 #include <vulkan/vulkan_metal.h>
 #include <stdio.h>
 
@@ -70,7 +71,7 @@ static XrResult extension_string(XrInstance instance, XrSystemId system, uint32_
     *count = (uint32_t)strlen(extensions) + 1;
     if (!capacity) return XR_SUCCESS;
     if (capacity < *count) return XR_ERROR_SIZE_INSUFFICIENT;
-    fprintf(stderr, "wineopenxr: Vulkan required extensions: %s\n", extensions);
+    mw_log("wineopenxr: Vulkan required extensions: %s\n", extensions);
     memcpy(buffer, extensions, *count);
     return XR_SUCCESS;
 }
@@ -304,10 +305,10 @@ XrResult mw_vk_create_session(XrInstance xr, const XrSessionCreateInfo *info, Xr
         VkResult vr = device_proc<PFN_vkCreateSemaphore>(s, "vkCreateSemaphore")(s->device, &create, nullptr, &s->timeline);
         if (vr != VK_SUCCESS) {
             s->timeline = VK_NULL_HANDLE;
-            fprintf(stderr, "wineopenxr: Vulkan timeline on the Metal event failed (%d); using the CPU fence wait\n", vr);
+            mw_log("wineopenxr: Vulkan timeline on the Metal event failed (%d); using the CPU fence wait\n", vr);
         }
     }
-    fprintf(stderr, "wineopenxr: session backend=kosmickrisp api=Vulkan sync=%s native=Metal\n",
+    mw_log("wineopenxr: session backend=kosmickrisp api=Vulkan sync=%s native=Metal\n",
             s->timeline ? "gpu-shared-event" : "fence-cpu-wait");
     *out = (XrSession)wrapper;
     return r;
@@ -384,7 +385,7 @@ XrResult mw_vk_enumerate_images(XrSwapchain sc, uint32_t capacity, uint32_t *cou
             free(vk); return r;
         }
         swap->images = vk;
-        fprintf(stderr, "wineopenxr: swapchain=%p api=Vulkan images=%u %ux%u array=%u format=%lld zero-copy=yes sync=fence-cpu-wait\n",
+        mw_log("wineopenxr: swapchain=%p api=Vulkan images=%u %ux%u array=%u format=%lld zero-copy=yes sync=fence-cpu-wait\n",
                 wrapper, swap->count, wrapper->info.width, wrapper->info.height, wrapper->info.arraySize, (long long)wrapper->info.format);
     }
     for (uint32_t i = 0; i < swap->count; ++i) images[i].image = swap->images[i];

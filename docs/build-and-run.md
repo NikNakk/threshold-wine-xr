@@ -80,6 +80,8 @@ Foveation is off unless requested. `MWXR_FOVEATION=fixed|gaze` (optionally `:OUT
 
 `MWXR_SWAPCHAIN_WAIT_MIN_MS` (default 5000) lengthens a shorter `xrWaitSwapchainImage` timeout to that many milliseconds; `0` passes the application's timeout through. Some games, EXD among them, ask for a fraction of a second and quit on a timeout, which a first-use shader compile during a level load can exceed. Each wait that outlasts the application's own timeout is logged.
 
+`MWXR_LOG_FILE` appends the bridge's messages, and the native runtime client's, to a file. A relative name is placed in `$STEAM_COMPAT_DATA_PATH` when that is set, so each Steam game gets its own. Use it when the game has no terminal, as under NotProton.
+
 ## Probe builds
 
 `./scripts/build-graphics-interop-probe.zsh` uses `DXMT_SOURCE_DIR`, `MWXR_WINE_SDK` and `MWXR_WINE_SOURCE` to build the OpenXR-independent texture/fence probe. Run it only in an isolated test prefix with the matching Wine/DXMT runtime. `in_process_swapchain.exe` verifies runtime-owned image readback and needs the built `wine_metal_probe` helper and a working native runtime. The native runtime may activate a headset when a probe connects; the source-only CMake checks do not connect to OpenXR.

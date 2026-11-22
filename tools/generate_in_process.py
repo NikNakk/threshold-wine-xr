@@ -81,12 +81,12 @@ def patch(name, old, new, count):
 # A second one for XR_MNDX_display_distortion, which is not in the Khronos
 # registry (mndx_display_distortion.h).
 patch('loader_thunks.h', '    unix_count,\n',
-      '    unix_mw_vulkan_native,\n    unix_mw_graphics_native,\n    unix_mw_display_distortion,\n    unix_mw_foveation,\n    unix_mw_gaze_foveation,\n    unix_count,\n', 1)
+      '    unix_mw_vulkan_native,\n    unix_mw_graphics_native,\n    unix_mw_display_distortion,\n    unix_mw_foveation,\n    unix_mw_gaze_foveation,\n    unix_mw_log,\n    unix_count,\n', 1)
 patch('openxr_thunks.c', '};\nC_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == unix_count);',
       '    (unixlib_entry_t)mw_vulkan_native_call,\n    (unixlib_entry_t)mw_graphics_native_call,\n    (unixlib_entry_t)mw_display_distortion_call,\n'
-      '    (unixlib_entry_t)mw_foveation_call,\n    (unixlib_entry_t)mw_gaze_foveation_call,\n'
+      '    (unixlib_entry_t)mw_foveation_call,\n    (unixlib_entry_t)mw_gaze_foveation_call,\n    (unixlib_entry_t)mw_log_call,\n'
       '};\nC_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == unix_count);', 1)
 patch('openxr_thunks.c', 'const unixlib_entry_t __wine_unix_call_funcs[] =',
       'extern int mw_vulkan_native_call(void *params);\nextern int mw_graphics_native_call(void *params);\nextern int mw_display_distortion_call(void *params);\n'
-      'extern int mw_foveation_call(void *params);\nextern int mw_gaze_foveation_call(void *params);\n'
+      'extern int mw_foveation_call(void *params);\nextern int mw_gaze_foveation_call(void *params);\nextern int mw_log_call(void *params);\n'
       'const unixlib_entry_t __wine_unix_call_funcs[] =', 1)
