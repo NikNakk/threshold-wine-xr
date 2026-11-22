@@ -411,8 +411,7 @@ XrResult mw_vk_acquire(XrSwapchain sc, const XrSwapchainImageAcquireInfo *info, 
 XrResult mw_vk_wait(XrSwapchain sc, const XrSwapchainImageWaitInfo *info)
 {
     auto *swap = (VulkanSwap *)wine_swapchain_from_handle(sc)->graphics;
-    xrWaitSwapchainImage_params p = {sc, info};
-    XrResult r = UNIX_CALL(xrWaitSwapchainImage, &p) ? XR_ERROR_RUNTIME_FAILURE : p.result;
+    XrResult r = mw_wait_swapchain_image(sc, info);
     if (r == XR_SUCCESS || r == XR_SESSION_LOSS_PENDING) ++swap->waited;
     return r;
 }

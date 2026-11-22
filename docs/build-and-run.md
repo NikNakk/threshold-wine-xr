@@ -78,6 +78,8 @@ For a compatible Vulkan stack, set `MWXR_VULKAN=kosmickrisp` and `MWXR_KK_ROOT` 
 
 Foveation is off unless requested. `MWXR_FOVEATION=fixed|gaze` (optionally `:OUTER[,CORE,EDGE[,STEP]]`) requires compatible runtime/graphics extensions and an explicitly selected `MWXR_FOVEATION_BUILD`. DXMT foveation also requires its runtime marker `share/mwxr-foveation-dxmt`; Vulkan foveation requires a compatible KosmicKrisp. These are advanced interfaces, not a promise of support for an arbitrary game. Do not enable them to establish a first baseline.
 
+`MWXR_SWAPCHAIN_WAIT_MIN_MS` (default 5000) lengthens a shorter `xrWaitSwapchainImage` timeout to that many milliseconds; `0` passes the application's timeout through. Some games, EXD among them, ask for a fraction of a second and quit on a timeout, which a first-use shader compile during a level load can exceed. Each wait that outlasts the application's own timeout is logged.
+
 ## Probe builds
 
 `./scripts/build-graphics-interop-probe.zsh` uses `DXMT_SOURCE_DIR`, `MWXR_WINE_SDK` and `MWXR_WINE_SOURCE` to build the OpenXR-independent texture/fence probe. Run it only in an isolated test prefix with the matching Wine/DXMT runtime. `in_process_swapchain.exe` verifies runtime-owned image readback and needs the built `wine_metal_probe` helper and a working native runtime. The native runtime may activate a headset when a probe connects; the source-only CMake checks do not connect to OpenXR.

@@ -14,6 +14,7 @@
 #include <string.h>
 #include "graphics_interop.h"
 #include "graphics_vulkan.h"
+#include "swapchain_wait.h"
 struct SwapState { wine_XrSwapchain *wrapper; GraphicsImage *images; XrSwapchainImageMetalKHR *metal; uint32_t count;
     uint32_t *acquired, acquired_head, acquired_count; SwapState *next;
     bool waited, foveation_applied, foveation_failed, requires_foveation_apply; uint64_t foveation_map; };
@@ -482,12 +483,33 @@ extern "C" XrResult WINAPI xrReleaseSwapchainImage(XrSwapchain swapchain, const 
     LeaveCriticalSection(&state->release_lock);
     return result;
 }
+XrResult mw_wait_swapchain_image(XrSwapchain swapchain, const XrSwapchainImageWaitInfo *info)
+{
+    static int64_t floor_ns = -1;
+    if (floor_ns < 0) floor_ns = mw_swapchain_wait_floor_ns(getenv("MWXR_SWAPCHAIN_WAIT_MIN_MS"));
+    XrSwapchainImageWaitInfo longer;
+    const XrSwapchainImageWaitInfo *asked = info;
+    if (info && mw_swapchain_wait_timeout(info->timeout, floor_ns) != info->timeout) {
+        longer = *info;
+        longer.timeout = floor_ns;
+        asked = &longer;
+    }
+    const ULONGLONG started = GetTickCount64();
+    struct xrWaitSwapchainImage_params params = {swapchain, asked};
+    XrResult result = call_result(UNIX_CALL(xrWaitSwapchainImage, &params), params.result);
+    const int64_t took_ms = (int64_t)(GetTickCount64() - started);
+    if (asked != info && took_ms * 1000000 > info->timeout) {
+        fprintf(stderr, "wineopenxr: swapchain image wait took %lld ms, past the application's %lld ms "
+                "(MWXR_SWAPCHAIN_WAIT_MIN_MS=%lld) result=%d\n", (long long)took_ms,
+                (long long)(info->timeout / 1000000), (long long)(floor_ns / 1000000), result);
+        fflush(stderr);
+    }
+    return result;
+}
 extern "C" XrResult WINAPI xrWaitSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageWaitInfo *info)
 {
     if (wine_swapchain_from_handle(swapchain)->session->vulkan) return mw_vk_wait(swapchain, info);
-    struct xrWaitSwapchainImage_params params = {swapchain, info};
-    NTSTATUS status = UNIX_CALL(xrWaitSwapchainImage, &params);
-    XrResult result = call_result(status, params.result);
+    XrResult result = mw_wait_swapchain_image(swapchain, info);
     if (result == XR_SUCCESS || result == XR_SESSION_LOSS_PENDING)
         ((SwapState *)wine_swapchain_from_handle(swapchain)->graphics)->waited = true;
     return result;

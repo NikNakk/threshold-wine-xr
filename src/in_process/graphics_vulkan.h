@@ -19,6 +19,8 @@ XrResult mw_vk_destroy_swapchain(XrSwapchain);
 XrResult mw_vk_enumerate_images(XrSwapchain, uint32_t, uint32_t *, XrSwapchainImageBaseHeader *);
 XrResult mw_vk_acquire(XrSwapchain, const XrSwapchainImageAcquireInfo *, uint32_t *);
 XrResult mw_vk_wait(XrSwapchain, const XrSwapchainImageWaitInfo *);
+// Both graphics paths' xrWaitSwapchainImage, with the floor of swapchain_wait.h (graphics.cpp).
+XrResult mw_wait_swapchain_image(XrSwapchain, const XrSwapchainImageWaitInfo *);
 XrResult mw_vk_release(XrSwapchain, const XrSwapchainImageReleaseInfo *);
 // The submitted stereo projection layer, for gaze foveation (MWXR_FOVEATION with MWXR_KK_FOVEATION).
 void mw_vk_note_projection(XrSession, const XrCompositionLayerProjection *);
