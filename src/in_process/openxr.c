@@ -181,7 +181,14 @@ XrResult wine_xrCreateInstance(const XrInstanceCreateInfo *info, XrInstance *ins
                 wrapper->gaze_foveation == 1 ? "requested from the runtime" : "fixed (runtime has no foveation state)");
     }
     const char *provider = getenv("MWXR_FOVEATION_PROVIDER");
-    if (provider && (!strcmp(provider, "monado") || !strcmp(provider, "monado-angular"))) {
+    int wants_provider = provider && (!strcmp(provider, "monado") || !strcmp(provider, "monado-angular"));
+    // The provider feeds DXMT's rate maps. A launcher may leave it on for every game, so a
+    // Vulkan application runs without it rather than being refused an instance.
+    if (wants_provider && !wrapper->d3d11_enabled) {
+        fprintf(stderr, "wineopenxr: Monado foveation provider is for D3D11; off for this application\n");
+        wants_provider = 0;
+    }
+    if (wants_provider) {
         const char *positions = getenv("DXMT_RATE_MAP_POSITION"), *reads = getenv("DXMT_RATE_MAP_READ");
         const char *stay = getenv("DXMT_STAY_WARPED");
         // The final imported image is excluded from mapped passes only when
@@ -193,13 +200,15 @@ XrResult wine_xrCreateInstance(const XrInstanceCreateInfo *info, XrInstance *ins
         }
         // Preserve application-owned explicit transport; this provider is only
         // the bridge's opt-in implicit scene map source.
-        if (!wrapper->d3d11_enabled || wrapper->foveation_extensions || wrapper->foveation_d3d11_enabled ||
+        if (wrapper->foveation_extensions || wrapper->foveation_d3d11_enabled ||
             wrapper->gaze_foveation != 1 || !native_extension_present(XR_MNDX_FOVEATION_METAL_EXTENSION_NAME)) {
+            fprintf(stderr, "wineopenxr: Monado foveation provider unavailable (application foveation, no gaze foveation or no runtime map extension)\n");
             pthread_mutex_unlock(&instance_mutex);
             return XR_ERROR_FEATURE_UNSUPPORTED;
         }
         const char *fixed = getenv("MWXR_GAZE_FOVEATION_FIXED");
         if ((!fixed || strcmp(fixed, "1")) && !native_extension_present("XR_META_foveation_eye_tracked")) {
+            fprintf(stderr, "wineopenxr: Monado foveation provider needs eye tracking (XR_META_foveation_eye_tracked) or MWXR_GAZE_FOVEATION_FIXED=1\n");
             pthread_mutex_unlock(&instance_mutex);
             return XR_ERROR_EXTENSION_NOT_PRESENT;
         }
