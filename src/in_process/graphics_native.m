@@ -367,6 +367,14 @@ static id<MTLRasterizationRateMap> gaze_build(id<MTLDevice> device, const struct
     [layer release];
     return map;
 }
+// The profile's numbers (outer,core,edge,step). MWXR_GAZE_FOVEATION switches gaze foveation
+// on and carries them; MWXR_GAZE_FOVEATION_PROFILE, when set, replaces just the numbers, so a
+// launcher can offer profiles while one setting keeps foveation on.
+static const char *gaze_profile_text(void)
+{
+    const char *profile = getenv("MWXR_GAZE_FOVEATION_PROFILE");
+    return profile && *profile ? profile : getenv("MWXR_GAZE_FOVEATION");
+}
 // Angular v5: the bridge passes render geometry; Monado owns gaze filtering,
 // profile evaluation and the map cache. No FB swapchain update/selecting query.
 static int32_t runtime_angular_foveation(struct mw_gaze_foveation_params *p, wine_XrSession *session,
@@ -380,11 +388,12 @@ static int32_t runtime_angular_foveation(struct mw_gaze_foveation_params *p, win
             gaze.force_fixed = fixed && !strcmp(fixed, "1");
             gaze.runtime_trace = trace && !strcmp(trace, "1");
             gaze.outer=.3f; gaze.core=12.f; gaze.edge=27.f; gaze.step=2.f;
-            const char *text=getenv("MWXR_GAZE_FOVEATION");
+            const char *text=gaze_profile_text();
             if(text) sscanf(text,"%f,%f,%f,%f",&gaze.outer,&gaze.core,&gaze.edge,&gaze.step);
             gaze.outer=fmaxf(.1f,fminf(1.f,gaze.outer)); gaze.step=fmaxf(.25f,fminf(10.f,gaze.step));
             gaze.core=fmaxf(1.f,gaze.core); gaze.edge=fmaxf(gaze.core+1.f,gaze.edge);
-            fprintf(stderr,"wineopenxr: Monado angular map provider active (%s)\n",gaze.force_fixed?"fixed":"runtime gaze");
+            fprintf(stderr,"wineopenxr: Monado angular map provider active (%s) profile=%g,%g,%g,%g\n",
+                    gaze.force_fixed?"fixed":"runtime gaze",gaze.outer,gaze.core,gaze.edge,gaze.step);
         }
         if(!gaze.profile) {
             XrFoveationMetalAngularProfileCreateInfoMNDX angular = {
@@ -529,7 +538,7 @@ int32_t mw_gaze_foveation_call(void *args)
             gaze.session = session; gaze.host_session = session->host_session;
             gaze.maps = [NSMutableDictionary new];
             gaze.outer = .3f; gaze.core = 12.f; gaze.edge = 27.f; gaze.step = 2.f;
-            sscanf(getenv("MWXR_GAZE_FOVEATION"), "%f,%f,%f,%f", &gaze.outer, &gaze.core, &gaze.edge, &gaze.step);
+            sscanf(gaze_profile_text(), "%f,%f,%f,%f", &gaze.outer, &gaze.core, &gaze.edge, &gaze.step);
             gaze.outer = fminf(1.f, fmaxf(.1f, gaze.outer)); gaze.step = fminf(10.f, fmaxf(.25f, gaze.step));
             gaze.core = fmaxf(1.f, gaze.core); gaze.edge = fmaxf(gaze.core + 1.f, gaze.edge);
             const char *text = getenv("MWXR_GAZE_FOVEATION_FIXED");

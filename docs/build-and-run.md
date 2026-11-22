@@ -78,6 +78,8 @@ For a compatible Vulkan stack, set `MWXR_VULKAN=kosmickrisp` and `MWXR_KK_ROOT` 
 
 Foveation is off unless requested. `MWXR_FOVEATION=fixed|gaze` (optionally `:OUTER[,CORE,EDGE[,STEP]]`) requires compatible runtime/graphics extensions and an explicitly selected `MWXR_FOVEATION_BUILD`. DXMT foveation also requires its runtime marker `share/mwxr-foveation-dxmt`; Vulkan foveation requires a compatible KosmicKrisp. These are advanced interfaces, not a promise of support for an arbitrary game. Do not enable them to establish a first baseline.
 
+`MWXR_GAZE_FOVEATION_PROFILE=OUTER,CORE,EDGE[,STEP]` replaces the numbers of the gaze foveation profile while `MWXR_GAZE_FOVEATION` keeps it on, so a launcher can offer profiles.
+
 `MWXR_SWAPCHAIN_WAIT_MIN_MS` (default 5000) lengthens a shorter `xrWaitSwapchainImage` timeout to that many milliseconds; `0` passes the application's timeout through. Some games, EXD among them, ask for a fraction of a second and quit on a timeout, which a first-use shader compile during a level load can exceed. Each wait that outlasts the application's own timeout is logged.
 
 `MWXR_LOG_FILE` appends the bridge's messages, and the native runtime client's, to a file. A relative name is placed in `$STEAM_COMPAT_DATA_PATH` when that is set, so each Steam game gets its own. Use it when the game has no terminal, as under NotProton.
