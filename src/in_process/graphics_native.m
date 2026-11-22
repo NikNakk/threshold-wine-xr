@@ -109,6 +109,7 @@ XrResult wine_xrEnumerateSwapchainFormats(XrSession session, uint32_t capacity, 
     if (XR_SUCCEEDED(result) && capacity && capacity < *count) return XR_ERROR_SIZE_INSUFFICIENT;
     return result;
 }
+static void apply_image_maps(wine_XrSession *session, XrSwapchain host_swapchain);
 XrResult wine_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *info, XrSwapchain *swapchain)
 {
     fprintf(stderr, "wineopenxr: swapchain %ux%u array=%u samples=%u usage=%#llx format=%lld\n", info->width,
@@ -135,8 +136,12 @@ XrResult wine_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *
     // Gaze foveation updates this swapchain's runtime foveation state; it never selects a
     // runtime map, so submitted images stay ordinary for the compositor.
     XrSwapchainCreateInfoFoveationFB gaze_info = {XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB};
-    if (wine_session_from_handle(session)->instance->gaze_foveation == 1 && !native.next) native.next = &gaze_info;
-    return g_xr_host_instance_dispatch_table.p_xrCreateSwapchain(wine_session_from_handle(session)->host_session, &native, swapchain);
+    wine_XrSession *wrapped = wine_session_from_handle(session);
+    if (wrapped->instance->gaze_foveation == 1 && !native.next) native.next = &gaze_info;
+    XrResult result = g_xr_host_instance_dispatch_table.p_xrCreateSwapchain(wrapped->host_session, &native, swapchain);
+    if (XR_SUCCEEDED(result) && wrapped->instance->monado_foveation_provider == 3 && native.next == &gaze_info)
+        apply_image_maps(wrapped, *swapchain);
+    return result;
 }
 
 int32_t mw_foveation_call(void *args)
@@ -375,6 +380,58 @@ static const char *gaze_profile_text(void)
     const char *profile = getenv("MWXR_GAZE_FOVEATION_PROFILE");
     return profile && *profile ? profile : getenv("MWXR_GAZE_FOVEATION");
 }
+// An angular profile (XR_MNDX_foveation_metal) with the shape MWXR_ANGULAR_PROFILE and
+// MWXR_ANGULAR_SIGMA_DEGREES select.
+static XrResult create_angular_profile(wine_XrSession *session, float outer, float core, float edge, float step,
+                                       int eye_tracked, XrFoveationProfileFB *out)
+{
+    XrFoveationMetalAngularProfileCreateInfoMNDX angular = {
+        XR_TYPE_FOVEATION_METAL_ANGULAR_PROFILE_CREATE_INFO_MNDX, NULL, outer, core, edge, step,
+        eye_tracked ? XR_TRUE : XR_FALSE};
+    XrFoveationMetalAngularShapeCreateInfoMNDX shape = {
+        XR_TYPE_FOVEATION_METAL_ANGULAR_SHAPE_CREATE_INFO_MNDX,NULL,XR_FOVEATION_METAL_ANGULAR_SHAPE_SMOOTHSTEP_MNDX,15.f};
+    const char *name=getenv("MWXR_ANGULAR_PROFILE"), *sigma=getenv("MWXR_ANGULAR_SIGMA_DEGREES");
+    if (name && strcmp(name,"smoothstep")) {
+        if (!strcmp(name,"gaussian-clamped")) shape.shape=XR_FOVEATION_METAL_ANGULAR_SHAPE_GAUSSIAN_CLAMPED_MNDX;
+        else if (!strcmp(name,"gaussian-floor")) shape.shape=XR_FOVEATION_METAL_ANGULAR_SHAPE_GAUSSIAN_FLOOR_MNDX;
+        else if (!strcmp(name,"gaussian-core")) shape.shape=XR_FOVEATION_METAL_ANGULAR_SHAPE_GAUSSIAN_CORE_MNDX;
+        else return XR_ERROR_VALIDATION_FAILURE;
+        if (sigma) {
+            char *end=NULL; shape.sigmaDegrees=strtof(sigma,&end);
+            if (end==sigma || *end || !isfinite(shape.sigmaDegrees)) return XR_ERROR_VALIDATION_FAILURE;
+        }
+        angular.next=&shape;
+    }
+    if (sigma && (!name || !strcmp(name,"smoothstep"))) return XR_ERROR_VALIDATION_FAILURE;
+    fprintf(stderr,"wineopenxr: angular shape=%s sigma=%.6g degrees\n",name?name:"smoothstep",shape.sigmaDegrees);
+    XrFoveationProfileCreateInfoFB info = {XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB,&angular};
+    return g_xr_host_instance_dispatch_table.p_xrCreateFoveationProfileFB(session->host_session,&info,out);
+}
+
+// Vulkan applications (monado_foveation_provider 3): Monado publishes maps and per-eye
+// profiles on each image of a swapchain carrying an angular profile, for the Vulkan
+// driver. The swapchain keeps its own copy, so the profile is destroyed straight away.
+static void apply_image_maps(wine_XrSession *session, XrSwapchain host_swapchain)
+{
+    float outer=.3f, core=12.f, edge=27.f, step=2.f;
+    const char *text=gaze_profile_text();
+    if (text) sscanf(text,"%f,%f,%f,%f",&outer,&core,&edge,&step);
+    outer=fmaxf(.1f,fminf(1.f,outer)); step=fmaxf(.25f,fminf(10.f,step));
+    core=fmaxf(1.f,core); edge=fmaxf(core+1.f,edge);
+    const char *fixed=getenv("MWXR_GAZE_FOVEATION_FIXED");
+    const int eye_tracked=!(fixed && !strcmp(fixed,"1"));
+    XrFoveationProfileFB profile=XR_NULL_HANDLE;
+    XrResult result=create_angular_profile(session,outer,core,edge,step,eye_tracked,&profile);
+    if (XR_SUCCEEDED(result)) {
+        XrSwapchainStateFoveationFB state={XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB,NULL,0,profile};
+        result=g_xr_host_instance_dispatch_table.p_xrUpdateSwapchainFB(host_swapchain,
+            (const XrSwapchainStateBaseHeaderFB *)&state);
+        g_xr_host_instance_dispatch_table.p_xrDestroyFoveationProfileFB(profile);
+    }
+    fprintf(stderr,"wineopenxr: Monado image maps on swapchain %p: profile=%g,%g,%g,%g %s result=%d\n",
+            (void *)host_swapchain,outer,core,edge,step,eye_tracked?"runtime gaze":"fixed",result);
+}
+
 // Angular v5: the bridge passes render geometry; Monado owns gaze filtering,
 // profile evaluation and the map cache. No FB swapchain update/selecting query.
 static int32_t runtime_angular_foveation(struct mw_gaze_foveation_params *p, wine_XrSession *session,
@@ -396,27 +453,7 @@ static int32_t runtime_angular_foveation(struct mw_gaze_foveation_params *p, win
                     gaze.force_fixed?"fixed":"runtime gaze",gaze.outer,gaze.core,gaze.edge,gaze.step);
         }
         if(!gaze.profile) {
-            XrFoveationMetalAngularProfileCreateInfoMNDX angular = {
-                XR_TYPE_FOVEATION_METAL_ANGULAR_PROFILE_CREATE_INFO_MNDX, NULL,
-                gaze.outer,gaze.core,gaze.edge,gaze.step,!gaze.force_fixed};
-            XrFoveationMetalAngularShapeCreateInfoMNDX shape = {
-                XR_TYPE_FOVEATION_METAL_ANGULAR_SHAPE_CREATE_INFO_MNDX,NULL,XR_FOVEATION_METAL_ANGULAR_SHAPE_SMOOTHSTEP_MNDX,15.f};
-            const char *name=getenv("MWXR_ANGULAR_PROFILE"), *sigma=getenv("MWXR_ANGULAR_SIGMA_DEGREES");
-            if (name && strcmp(name,"smoothstep")) {
-                if (!strcmp(name,"gaussian-clamped")) shape.shape=XR_FOVEATION_METAL_ANGULAR_SHAPE_GAUSSIAN_CLAMPED_MNDX;
-                else if (!strcmp(name,"gaussian-floor")) shape.shape=XR_FOVEATION_METAL_ANGULAR_SHAPE_GAUSSIAN_FLOOR_MNDX;
-                else if (!strcmp(name,"gaussian-core")) shape.shape=XR_FOVEATION_METAL_ANGULAR_SHAPE_GAUSSIAN_CORE_MNDX;
-                else { p->result=XR_ERROR_VALIDATION_FAILURE; return 0; }
-                if (sigma) {
-                    char *end=NULL; shape.sigmaDegrees=strtof(sigma,&end);
-                    if (end==sigma || *end || !isfinite(shape.sigmaDegrees)) { p->result=XR_ERROR_VALIDATION_FAILURE; return 0; }
-                }
-                angular.next=&shape;
-            }
-            if (sigma && (!name || !strcmp(name,"smoothstep"))) { p->result=XR_ERROR_VALIDATION_FAILURE; return 0; }
-            fprintf(stderr,"wineopenxr: angular shape=%s sigma=%.6g degrees\n",name?name:"smoothstep",shape.sigmaDegrees);
-            XrFoveationProfileCreateInfoFB info = {XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB,&angular};
-            p->result=g_xr_host_instance_dispatch_table.p_xrCreateFoveationProfileFB(session->host_session,&info,&gaze.profile);
+            p->result=create_angular_profile(session,gaze.outer,gaze.core,gaze.edge,gaze.step,!gaze.force_fixed,&gaze.profile);
             if(XR_FAILED(p->result)) return 0;
         }
         XrFoveationMetalAngularLookupInfoMNDX info={XR_TYPE_FOVEATION_METAL_ANGULAR_LOOKUP_INFO_MNDX};
@@ -525,6 +562,8 @@ int32_t mw_gaze_foveation_call(void *args)
         if (session->instance->monado_foveation_provider) p->result = XR_ERROR_FEATURE_UNSUPPORTED;
         return 0;
     }
+    // Image maps: Monado publishes on the images; nothing to do per frame.
+    if (session->instance->monado_foveation_provider == 3) return 0;
     if (session->instance->monado_foveation_provider == 2)
         return runtime_angular_foveation(p, session, device);
     if (session->instance->monado_foveation_provider)

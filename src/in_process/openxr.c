@@ -170,7 +170,9 @@ XrResult wine_xrCreateInstance(const XrInstanceCreateInfo *info, XrInstance *ins
     // MWXR_GAZE_FOVEATION: the application asks for nothing. The bridge enables Monado's
     // foveation state itself, only to read the runtime's private gaze centre each frame.
     const char *gaze = getenv("MWXR_GAZE_FOVEATION");
-    if (gaze && *gaze && strcmp(gaze, "0") && wrapper->d3d11_enabled && !wrapper->foveation_extensions) {
+    const int vulkan_only = !wrapper->d3d11_enabled && (wrapper->vulkan_enabled || wrapper->vulkan2_enabled);
+    if (gaze && *gaze && strcmp(gaze, "0") && (wrapper->d3d11_enabled || vulkan_only) &&
+        !wrapper->foveation_extensions) {
         wrapper->gaze_foveation = 1;
         for (uint32_t j = 0; j < ARRAY_SIZE(foveation_extensions); ++j)
             if (native_extension_present(foveation_extensions[j])) native_names[native_count++] = foveation_extensions[j];
@@ -182,11 +184,23 @@ XrResult wine_xrCreateInstance(const XrInstanceCreateInfo *info, XrInstance *ins
     }
     const char *provider = getenv("MWXR_FOVEATION_PROVIDER");
     int wants_provider = provider && (!strcmp(provider, "monado") || !strcmp(provider, "monado-angular"));
-    // The provider feeds DXMT's rate maps. A launcher may leave it on for every game, so a
-    // Vulkan application runs without it rather than being refused an instance.
-    if (wants_provider && !wrapper->d3d11_enabled) {
-        fprintf(stderr, "wineopenxr: Monado foveation provider is for D3D11; off for this application\n");
+    // A Vulkan application: Monado publishes its maps and per-eye profiles on the swapchain
+    // images themselves (XR_MNDX_foveation_metal v7), where the Vulkan driver in this
+    // process (KosmicKrisp, also under Zink or VKD3D) finds them. The bridge only applies
+    // the angular profile to each swapchain it creates.
+    if (wants_provider && vulkan_only) {
         wants_provider = 0;
+        const char *fixed = getenv("MWXR_GAZE_FOVEATION_FIXED");
+        if (wrapper->foveation_extensions || wrapper->gaze_foveation != 1 ||
+            !native_extension_present(XR_MNDX_FOVEATION_METAL_EXTENSION_NAME)) {
+            fprintf(stderr, "wineopenxr: Monado image maps unavailable (application foveation, no gaze foveation or no runtime map extension); off\n");
+        } else if ((!fixed || strcmp(fixed, "1")) && !native_extension_present("XR_META_foveation_eye_tracked")) {
+            fprintf(stderr, "wineopenxr: Monado image maps need eye tracking or MWXR_GAZE_FOVEATION_FIXED=1; off\n");
+        } else {
+            native_names[native_count++] = XR_MNDX_FOVEATION_METAL_EXTENSION_NAME;
+            wrapper->monado_foveation_provider = 3;
+            fprintf(stderr, "wineopenxr: Monado image maps for the Vulkan driver\n");
+        }
     }
     if (wants_provider) {
         const char *positions = getenv("DXMT_RATE_MAP_POSITION"), *reads = getenv("DXMT_RATE_MAP_READ");
