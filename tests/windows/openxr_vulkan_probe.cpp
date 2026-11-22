@@ -75,7 +75,7 @@ int main(int argc, char **argv)
     VK_PROC(vkGetPhysicalDeviceQueueFamilyProperties); VK_PROC(vkCreateDevice); VK_PROC(vkGetDeviceQueue);
     VK_PROC(vkCreateCommandPool); VK_PROC(vkAllocateCommandBuffers); VK_PROC(vkBeginCommandBuffer);
     VK_PROC(vkEndCommandBuffer); VK_PROC(vkCmdPipelineBarrier); VK_PROC(vkCmdClearColorImage);
-    VK_PROC(vkQueueSubmit); VK_PROC(vkDestroyCommandPool); VK_PROC(vkDestroyDevice); VK_PROC(vkDestroyInstance);
+    VK_PROC(vkQueueSubmit); VK_PROC(vkQueueWaitIdle); VK_PROC(vkDestroyCommandPool); VK_PROC(vkDestroyDevice); VK_PROC(vkDestroyInstance);
     VK_PROC(vkCreateBuffer); VK_PROC(vkGetBufferMemoryRequirements); VK_PROC(vkGetPhysicalDeviceMemoryProperties);
     VK_PROC(vkAllocateMemory); VK_PROC(vkBindBufferMemory); VK_PROC(vkCmdCopyImageToBuffer);
     VK_PROC(vkMapMemory); VK_PROC(vkUnmapMemory); VK_PROC(vkDestroyBuffer); VK_PROC(vkFreeMemory);
@@ -203,6 +203,9 @@ int main(int argc, char **argv)
         CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
         XrSwapchainImageReleaseInfo ri = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
         CHECK(xrReleaseSwapchainImage(swap, &ri));
+        // Release orders the runtime after this queue's work on the GPU; it does not wait
+        // for it, so the application waits before reading the copy back.
+        CHECK(vkQueueWaitIdle(queue));
         void *pixels; CHECK(vkMapMemory(device, memory, 0, VK_WHOLE_SIZE, 0, &pixels));
         auto *bytes = (unsigned char *)pixels;
         for (uint32_t n = 0; n < 64*64*layers; ++n)
