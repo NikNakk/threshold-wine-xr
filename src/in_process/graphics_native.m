@@ -139,7 +139,11 @@ XrResult wine_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *
     wine_XrSession *wrapped = wine_session_from_handle(session);
     if (wrapped->instance->gaze_foveation == 1 && !native.next) native.next = &gaze_info;
     XrResult result = g_xr_host_instance_dispatch_table.p_xrCreateSwapchain(wrapped->host_session, &native, swapchain);
-    if (XR_SUCCEEDED(result) && wrapped->instance->monado_foveation_provider == 3 && native.next == &gaze_info)
+    // Image maps for a Vulkan session, whichever APIs the instance enabled: an OpenVR layer
+    // such as xrizer enables D3D11 and Vulkan and renders through either.
+    if (XR_SUCCEEDED(result) && native.next == &gaze_info &&
+        (wrapped->instance->monado_foveation_provider == 3 ||
+         (wrapped->instance->monado_foveation_provider && wrapped->vulkan)))
         apply_image_maps(wrapped, *swapchain);
     return result;
 }
@@ -562,8 +566,9 @@ int32_t mw_gaze_foveation_call(void *args)
         if (session->instance->monado_foveation_provider) p->result = XR_ERROR_FEATURE_UNSUPPORTED;
         return 0;
     }
-    // Image maps: Monado publishes on the images; nothing to do per frame.
-    if (session->instance->monado_foveation_provider == 3) return 0;
+    // Image maps (a Vulkan session): Monado publishes on the images; nothing to do per frame.
+    if (session->instance->monado_foveation_provider == 3 ||
+        (session->instance->monado_foveation_provider && session->vulkan)) return 0;
     if (session->instance->monado_foveation_provider == 2)
         return runtime_angular_foveation(p, session, device);
     if (session->instance->monado_foveation_provider)
